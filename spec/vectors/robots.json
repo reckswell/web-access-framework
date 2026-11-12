@@ -1,0 +1,229 @@
+{
+ "description": "parse(robots) then allowed(agent, target) must equal each check; crawl_delay(agent) must equal crawl_delay.",
+ "cases": [
+  {
+   "name": "specific group wins over *",
+   "robots": "User-agent: *\nDisallow: /private\nAllow: /private/public\nDisallow: /*.pdf$\nDisallow: /search?\n\nUser-agent: web-access-framework\nUser-agent: otherbot\nDisallow: /only-us\nCrawl-delay: 2\n",
+   "agent": "web-access-framework",
+   "crawl_delay": 2.0,
+   "checks": [
+    [
+     "/private",
+     true
+    ],
+    [
+     "/only-us/x",
+     false
+    ],
+    [
+     "/",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "star group rules",
+   "robots": "User-agent: *\nDisallow: /private\nAllow: /private/public\nDisallow: /*.pdf$\nDisallow: /search?\n\nUser-agent: web-access-framework\nUser-agent: otherbot\nDisallow: /only-us\nCrawl-delay: 2\n",
+   "agent": "somebot",
+   "crawl_delay": null,
+   "checks": [
+    [
+     "/private",
+     false
+    ],
+    [
+     "/private/public/x",
+     true
+    ],
+    [
+     "/privateer",
+     false
+    ],
+    [
+     "/file.pdf",
+     false
+    ],
+    [
+     "/file.pdf?x=1",
+     true
+    ],
+    [
+     "/search?q=1",
+     false
+    ],
+    [
+     "/search",
+     true
+    ],
+    [
+     "/robots.txt",
+     true
+    ],
+    [
+     "/",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "allow wins a tie",
+   "robots": "User-agent: *\nDisallow: /page\nAllow: /page\n",
+   "agent": "x",
+   "crawl_delay": null,
+   "checks": [
+    [
+     "/page",
+     true
+    ],
+    [
+     "/page2",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "empty disallow adds nothing",
+   "robots": "User-agent: *\nDisallow:\n",
+   "agent": "x",
+   "crawl_delay": null,
+   "checks": [
+    [
+     "/anything",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "rules before any user-agent are ignored; comments stripped",
+   "robots": "Disallow: /x\nUser-agent: * # everyone\nDisallow: /y   # comment\n",
+   "agent": "x",
+   "crawl_delay": null,
+   "checks": [
+    [
+     "/x",
+     true
+    ],
+    [
+     "/y",
+     false
+    ],
+    [
+     "/y2",
+     false
+    ]
+   ]
+  },
+  {
+   "name": "wildcard in the middle",
+   "robots": "User-agent: *\nDisallow: /a/*/c\n",
+   "agent": "x",
+   "crawl_delay": null,
+   "checks": [
+    [
+     "/a/b/c",
+     false
+    ],
+    [
+     "/a/c",
+     true
+    ],
+    [
+     "/a/b/cd",
+     false
+    ],
+    [
+     "/a/b/x/c",
+     false
+    ]
+   ]
+  },
+  {
+   "name": "keys and agent are case-insensitive",
+   "robots": "USER-AGENT: Web-Access-Framework\nDISALLOW: /\n",
+   "agent": "web-access-framework",
+   "crawl_delay": null,
+   "checks": [
+    [
+     "/",
+     false
+    ],
+    [
+     "/robots.txt",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "other agents' groups do not apply",
+   "robots": "User-agent: a\nDisallow: /a\n\nUser-agent: *\nDisallow: /star\n",
+   "agent": "b",
+   "crawl_delay": null,
+   "checks": [
+    [
+     "/a",
+     true
+    ],
+    [
+     "/star",
+     false
+    ]
+   ]
+  },
+  {
+   "name": "crawl-delay in the * group; CRLF line endings",
+   "robots": "User-agent: *\r\nCrawl-delay: 0.5\r\nDisallow: /tmp\r\n",
+   "agent": "x",
+   "crawl_delay": 0.5,
+   "checks": [
+    [
+     "/tmp/1",
+     false
+    ]
+   ]
+  },
+  {
+   "name": "no groups means allow all",
+   "robots": "# nothing here\n",
+   "agent": "x",
+   "crawl_delay": null,
+   "checks": [
+    [
+     "/anything",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "a new user-agent after rules starts a new group",
+   "robots": "User-agent: x\nDisallow: /one\nUser-agent: y\nDisallow: /two\n",
+   "agent": "x",
+   "crawl_delay": null,
+   "checks": [
+    [
+     "/one",
+     false
+    ],
+    [
+     "/two",
+     true
+    ]
+   ]
+  },
+  {
+   "name": "dollar anchor",
+   "robots": "User-agent: *\nDisallow: /$\n",
+   "agent": "x",
+   "crawl_delay": null,
+   "checks": [
+    [
+     "/",
+     false
+    ],
+    [
+     "/a",
+     true
+    ]
+   ]
+  }
+ ]
+}

@@ -1,0 +1,363 @@
+{
+ "description": "Cases for run.py. {base} = mock server URL, {BASE} = same with an upper-case scheme, {tmp} = case temp dir, {LOCAL} = the same server named as localhost. `files` are written into {tmp} first. Every case also gets base_config.",
+ "base_config": {
+  "engine": {
+   "request_timeout": 2.0,
+   "stats_interval": 0,
+   "https_only": false
+  },
+  "host": {
+   "initial_rate": 50.0,
+   "max_rate": 100.0,
+   "breaker_cooldown": 0.5
+  },
+  "retry": {
+   "base_delay": 0.05,
+   "max_delay": 0.2
+  }
+ },
+ "cases": [
+  {
+   "name": "outcomes, robots and event log",
+   "config": {
+    "engine": {
+     "log_path": "{tmp}/events.jsonl"
+    }
+   },
+   "urls": [
+    "{base}/ok",
+    "{base}/status/404",
+    "{base}/status/401",
+    "{base}/status/418",
+    "{base}/status/501",
+    "{base}/challenge",
+    "{base}/private/x",
+    "{base}/redirect?to=/ok"
+   ],
+   "expect": {
+    "records": [
+     {
+      "url": "{base}/ok",
+      "outcome": "ok",
+      "status": 200,
+      "attempts": 1
+     },
+     {
+      "url": "{base}/status/404",
+      "outcome": "not_found",
+      "status": 404,
+      "attempts": 1
+     },
+     {
+      "url": "{base}/status/401",
+      "outcome": "auth_required",
+      "status": 401,
+      "attempts": 1
+     },
+     {
+      "url": "{base}/status/418",
+      "outcome": "client_error",
+      "status": 418,
+      "attempts": 1
+     },
+     {
+      "url": "{base}/status/501",
+      "outcome": "failed",
+      "status": 501,
+      "attempts": 1
+     },
+     {
+      "url": "{base}/challenge",
+      "outcome": "blocked",
+      "status": 403,
+      "attempts": 1
+     },
+     {
+      "url": "{base}/private/x",
+      "outcome": "robots_disallowed",
+      "status": null,
+      "attempts": 0
+     },
+     {
+      "url": "{base}/redirect?to=/ok",
+      "outcome": "ok",
+      "status": 200,
+      "attempts": 1,
+      "final_url": "{base}/ok"
+     }
+    ],
+    "hits": {
+     "/private": 0,
+     "/robots.txt": 1
+    },
+    "events": true
+   }
+  },
+  {
+   "name": "retries and backoff",
+   "config": {
+    "retry": {
+     "max_attempts": 3
+    }
+   },
+   "urls": [
+    "{base}/flaky?fail=2",
+    "{base}/status/500",
+    "{base}/status/503"
+   ],
+   "expect": {
+    "records": [
+     {
+      "url": "{base}/flaky?fail=2",
+      "outcome": "ok",
+      "status": 200,
+      "attempts": 3
+     },
+     {
+      "url": "{base}/status/500",
+      "outcome": "failed",
+      "status": 500,
+      "attempts": 3
+     },
+     {
+      "url": "{base}/status/503",
+      "outcome": "failed",
+      "status": 503,
+      "attempts": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "Retry-After is honored",
+   "config": {},
+   "urls": [
+    "{base}/ratelimit?wait=1"
+   ],
+   "expect": {
+    "records": [
+     {
+      "url": "{base}/ratelimit?wait=1",
+      "outcome": "ok",
+      "status": 200,
+      "attempts": 2
+     }
+    ],
+    "min_gap": {
+     "/ratelimit": 0.95
+    }
+   }
+  },
+  {
+   "name": "timeouts are retried then fail",
+   "config": {
+    "engine": {
+     "request_timeout": 0.3
+    },
+    "retry": {
+     "max_attempts": 2
+    }
+   },
+   "urls": [
+    "{base}/slow?ms=1500"
+   ],
+   "expect": {
+    "records": [
+     {
+      "url": "{base}/slow?ms=1500",
+      "outcome": "failed",
+      "status": null,
+      "attempts": 2,
+      "error": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "per-host pacing",
+   "config": {
+    "host": {
+     "initial_rate": 5.0,
+     "max_rate": 5.0,
+     "max_concurrency": 2
+    }
+   },
+   "urls": [
+    "{base}/ok?i=0",
+    "{base}/ok?i=1",
+    "{base}/ok?i=2",
+    "{base}/ok?i=3",
+    "{base}/ok?i=4",
+    "{base}/ok?i=5"
+   ],
+   "expect": {
+    "record_count": 6,
+    "min_gap": {
+     "/ok?i=": 0.18
+    }
+   }
+  },
+  {
+   "name": "dedup by normalized URL",
+   "config": {},
+   "urls": [
+    "{base}/ok?d=1",
+    "{base}/ok?d=1#frag",
+    "{BASE}/ok?d=1"
+   ],
+   "expect": {
+    "record_count": 1,
+    "hits": {
+     "/ok?d=1": 1
+    }
+   }
+  },
+  {
+   "name": "host is blocked after repeated challenges",
+   "config": {
+    "host": {
+     "blocked_threshold": 2,
+     "max_concurrency": 1
+    }
+   },
+   "urls": [
+    "{base}/challenge?i=0",
+    "{base}/challenge?i=1",
+    "{base}/challenge?i=2",
+    "{base}/challenge?i=3"
+   ],
+   "expect": {
+    "outcome_counts": {
+     "blocked": 2,
+     "host_blocked": 2
+    },
+    "hits": {
+     "/challenge": 2
+    }
+   }
+  },
+  {
+   "name": "invalid input lines",
+   "config": {},
+   "urls": [
+    "# a comment",
+    "",
+    "ftp://example.com/",
+    "not a url",
+    "{base}/ok?v=1"
+   ],
+   "expect": {
+    "outcome_counts": {
+     "invalid": 2,
+     "ok": 1
+    }
+   }
+  },
+  {
+   "name": "crawl goal with field extraction",
+   "config": {
+    "goal": {
+     "type": "crawl",
+     "seeds": [
+      "{base}/site/0"
+     ],
+     "max_depth": 2,
+     "fields": {
+      "title": "title",
+      "price": ".price",
+      "image": "img@src",
+      "missing": ".nope"
+     }
+    }
+   },
+   "urls": [],
+   "expect": {
+    "record_count": 7,
+    "records": [
+     {
+      "url": "{base}/site/0",
+      "title": "Page 0",
+      "price": "0",
+      "image": "{base}/img/0.png",
+      "missing": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "https_only refuses plain http",
+   "config": {
+    "engine": {
+     "https_only": true
+    }
+   },
+   "urls": [
+    "{base}/ok"
+   ],
+   "expect": {
+    "records": [
+     {
+      "url": "{base}/ok",
+      "outcome": "insecure",
+      "status": null,
+      "attempts": 0
+     }
+    ],
+    "hits": {
+     "/ok": 0,
+     "/robots.txt": 0
+    }
+   }
+  },
+  {
+   "name": "blocked domains, blocklist files and redirect hops",
+   "config": {
+    "engine": {
+     "blocked_domains": [
+      "localhost"
+     ],
+     "blocklist_files": [
+      "{tmp}/block.txt"
+     ]
+    }
+   },
+   "files": {
+    "block.txt": "# hosts format\n0.0.0.0 blocked.example\n"
+   },
+   "urls": [
+    "{base}/ok",
+    "{LOCAL}/ok?direct=1",
+    "http://www.blocked.example/",
+    "{base}/redirect?to={LOCAL}/ok"
+   ],
+   "expect": {
+    "records": [
+     {
+      "url": "{base}/ok",
+      "outcome": "ok"
+     },
+     {
+      "url": "{LOCAL}/ok?direct=1",
+      "outcome": "unsafe",
+      "attempts": 0
+     },
+     {
+      "url": "http://www.blocked.example/",
+      "outcome": "unsafe",
+      "attempts": 0
+     },
+     {
+      "url": "{base}/redirect?to={LOCAL}/ok",
+      "outcome": "unsafe",
+      "status": null,
+      "attempts": 1
+     }
+    ],
+    "hits": {
+     "/ok": 1,
+     "/redirect": 1
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,258 @@
+{
+ "description": "classify(status, error, body) -> outcome, signal, retry. body is the response body as text.",
+ "cases": [
+  {
+   "status": 200,
+   "error": null,
+   "body": "",
+   "outcome": "ok",
+   "signal": "healthy",
+   "retry": false
+  },
+  {
+   "status": 204,
+   "error": null,
+   "body": "",
+   "outcome": "ok",
+   "signal": "healthy",
+   "retry": false
+  },
+  {
+   "status": 304,
+   "error": null,
+   "body": "",
+   "outcome": "ok",
+   "signal": "healthy",
+   "retry": false
+  },
+  {
+   "status": 200,
+   "error": null,
+   "body": "<p>Solve the captcha to win</p>",
+   "outcome": "ok",
+   "signal": "healthy",
+   "retry": false
+  },
+  {
+   "status": 401,
+   "error": null,
+   "body": "",
+   "outcome": "auth_required",
+   "signal": "healthy",
+   "retry": false
+  },
+  {
+   "status": 403,
+   "error": null,
+   "body": "Forbidden",
+   "outcome": "blocked",
+   "signal": "blocked",
+   "retry": false
+  },
+  {
+   "status": 403,
+   "error": null,
+   "body": "<div class=\"g-recaptcha\">",
+   "outcome": "blocked",
+   "signal": "blocked",
+   "retry": false
+  },
+  {
+   "status": 404,
+   "error": null,
+   "body": "",
+   "outcome": "not_found",
+   "signal": "healthy",
+   "retry": false
+  },
+  {
+   "status": 410,
+   "error": null,
+   "body": "",
+   "outcome": "not_found",
+   "signal": "healthy",
+   "retry": false
+  },
+  {
+   "status": 400,
+   "error": null,
+   "body": "",
+   "outcome": "client_error",
+   "signal": "healthy",
+   "retry": false
+  },
+  {
+   "status": 418,
+   "error": null,
+   "body": "",
+   "outcome": "client_error",
+   "signal": "healthy",
+   "retry": false
+  },
+  {
+   "status": 408,
+   "error": null,
+   "body": "",
+   "outcome": "failed",
+   "signal": "throttle",
+   "retry": true
+  },
+  {
+   "status": 429,
+   "error": null,
+   "body": "slow down",
+   "outcome": "failed",
+   "signal": "throttle",
+   "retry": true
+  },
+  {
+   "status": 429,
+   "error": null,
+   "body": "Please verify you are human",
+   "outcome": "blocked",
+   "signal": "blocked",
+   "retry": false
+  },
+  {
+   "status": 500,
+   "error": null,
+   "body": "",
+   "outcome": "failed",
+   "signal": "server_error",
+   "retry": true
+  },
+  {
+   "status": 501,
+   "error": null,
+   "body": "",
+   "outcome": "failed",
+   "signal": "server_error",
+   "retry": false
+  },
+  {
+   "status": 502,
+   "error": null,
+   "body": "",
+   "outcome": "failed",
+   "signal": "throttle",
+   "retry": true
+  },
+  {
+   "status": 503,
+   "error": null,
+   "body": "maintenance",
+   "outcome": "failed",
+   "signal": "throttle",
+   "retry": true
+  },
+  {
+   "status": 503,
+   "error": null,
+   "body": "<script src=\"/cdn-cgi/challenge-platform/x.js\">",
+   "outcome": "blocked",
+   "signal": "blocked",
+   "retry": false
+  },
+  {
+   "status": 504,
+   "error": null,
+   "body": "",
+   "outcome": "failed",
+   "signal": "throttle",
+   "retry": true
+  },
+  {
+   "status": 505,
+   "error": null,
+   "body": "",
+   "outcome": "failed",
+   "signal": "server_error",
+   "retry": false
+  },
+  {
+   "status": 599,
+   "error": null,
+   "body": "",
+   "outcome": "failed",
+   "signal": "server_error",
+   "retry": true
+  },
+  {
+   "status": null,
+   "error": "timeout",
+   "body": "",
+   "outcome": "failed",
+   "signal": "throttle",
+   "retry": true
+  },
+  {
+   "status": null,
+   "error": "network",
+   "body": "",
+   "outcome": "failed",
+   "signal": "throttle",
+   "retry": true
+  },
+  {
+   "status": null,
+   "error": "redirects",
+   "body": "",
+   "outcome": "client_error",
+   "signal": "healthy",
+   "retry": false
+  },
+  {
+   "status": null,
+   "error": "insecure",
+   "body": "",
+   "outcome": "insecure",
+   "signal": "healthy",
+   "retry": false
+  },
+  {
+   "status": null,
+   "error": "unsafe",
+   "body": "",
+   "outcome": "unsafe",
+   "signal": "healthy",
+   "retry": false
+  }
+ ],
+ "retry_after": [
+  {
+   "value": "5",
+   "now": 1000.0,
+   "seconds": 5.0
+  },
+  {
+   "value": "0",
+   "now": 1000.0,
+   "seconds": 0.0
+  },
+  {
+   "value": " 12 ",
+   "now": 1000.0,
+   "seconds": 12.0
+  },
+  {
+   "value": "Thu, 01 Jan 1970 00:20:00 GMT",
+   "now": 1000.0,
+   "seconds": 200.0
+  },
+  {
+   "value": "Thu, 01 Jan 1970 00:00:10 GMT",
+   "now": 1000.0,
+   "seconds": 0.0
+  },
+  {
+   "value": "-3",
+   "now": 1000.0,
+   "seconds": null
+  },
+  {
+   "value": "soon",
+   "now": 1000.0,
+   "seconds": null
+  }
+ ]
+}

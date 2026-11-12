@@ -1,0 +1,117 @@
+{
+ "description": "normalize(in) -> out (null = invalid) and host_key(in) -> host; join cases compare normalize(join(base, href)).",
+ "normalize": [
+  {
+   "in": "HTTP://Example.COM",
+   "out": "http://example.com/",
+   "host": "example.com"
+  },
+  {
+   "in": "https://example.com:443/a?b=1#frag",
+   "out": "https://example.com/a?b=1",
+   "host": "example.com"
+  },
+  {
+   "in": "http://example.com:80/",
+   "out": "http://example.com/",
+   "host": "example.com"
+  },
+  {
+   "in": "https://example.com:80/",
+   "out": "https://example.com:80/",
+   "host": "example.com:80"
+  },
+  {
+   "in": "http://Example.com:8080/x",
+   "out": "http://example.com:8080/x",
+   "host": "example.com:8080"
+  },
+  {
+   "in": "https://example.com/path?",
+   "out": "https://example.com/path",
+   "host": "example.com"
+  },
+  {
+   "in": "https://example.com/A/B?Z=1&a=2",
+   "out": "https://example.com/A/B?Z=1&a=2",
+   "host": "example.com"
+  },
+  {
+   "in": "https://example.com/#top",
+   "out": "https://example.com/",
+   "host": "example.com"
+  },
+  {
+   "in": "https://user:pw@Example.com/x",
+   "out": "https://example.com/x",
+   "host": "example.com"
+  },
+  {
+   "in": "https://Bücher.example/a",
+   "out": "https://xn--bcher-kva.example/a",
+   "host": "xn--bcher-kva.example"
+  },
+  {
+   "in": "http://127.0.0.1:5000/ok",
+   "out": "http://127.0.0.1:5000/ok",
+   "host": "127.0.0.1:5000"
+  },
+  {
+   "in": "ftp://example.com/",
+   "out": null,
+   "host": null
+  },
+  {
+   "in": "mailto:someone@example.com",
+   "out": null,
+   "host": null
+  },
+  {
+   "in": "not a url",
+   "out": null,
+   "host": null
+  },
+  {
+   "in": "",
+   "out": null,
+   "host": null
+  }
+ ],
+ "join": [
+  {
+   "base": "https://ex.com/a/b",
+   "href": "c",
+   "out": "https://ex.com/a/c"
+  },
+  {
+   "base": "https://ex.com/a/b",
+   "href": "../d",
+   "out": "https://ex.com/d"
+  },
+  {
+   "base": "https://ex.com/a/b",
+   "href": "/e?x=1",
+   "out": "https://ex.com/e?x=1"
+  },
+  {
+   "base": "https://ex.com/a/b",
+   "href": "//other.com/f",
+   "out": "https://other.com/f"
+  },
+  {
+   "base": "https://ex.com/a/b",
+   "href": "?q=2",
+   "out": "https://ex.com/a/b?q=2"
+  },
+  {
+   "base": "https://ex.com/a/b",
+   "href": "#frag",
+   "out": "https://ex.com/a/b"
+  },
+  {
+   "base": "https://ex.com/a/b",
+   "href": "http://Other.com",
+   "out": "http://other.com/"
+  }
+ ]
+}

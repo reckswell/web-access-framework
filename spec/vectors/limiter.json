@@ -1,0 +1,327 @@
+{
+ "description": "Apply each step's signal (then retry_after, if not null) at time `now` to one host, starting from the initial state built from `config`; after each step the state must equal `expect`.",
+ "config": {
+  "initial_rate": 1.0,
+  "min_rate": 0.05,
+  "max_rate": 2.0,
+  "max_concurrency": 4,
+  "additive_increase": 0.25,
+  "increase_after": 2,
+  "decrease_factor": 0.5,
+  "max_retry_after": 60.0,
+  "breaker_threshold": 3,
+  "breaker_cooldown": 10.0,
+  "breaker_max_cooldown": 25.0,
+  "blocked_threshold": 2
+ },
+ "steps": [
+  {
+   "now": 0,
+   "signal": "healthy",
+   "retry_after": null,
+   "expect": {
+    "rate": 1.0,
+    "successes": 1,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 0,
+    "blocked": false
+   }
+  },
+  {
+   "now": 1,
+   "signal": "healthy",
+   "retry_after": null,
+   "expect": {
+    "rate": 1.25,
+    "successes": 0,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 0,
+    "blocked": false
+   }
+  },
+  {
+   "now": 2,
+   "signal": "healthy",
+   "retry_after": null,
+   "expect": {
+    "rate": 1.25,
+    "successes": 1,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 0,
+    "blocked": false
+   }
+  },
+  {
+   "now": 3,
+   "signal": "healthy",
+   "retry_after": null,
+   "expect": {
+    "rate": 1.5,
+    "successes": 0,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 0,
+    "blocked": false
+   }
+  },
+  {
+   "now": 4,
+   "signal": "healthy",
+   "retry_after": null,
+   "expect": {
+    "rate": 1.5,
+    "successes": 1,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 0,
+    "blocked": false
+   }
+  },
+  {
+   "now": 5,
+   "signal": "healthy",
+   "retry_after": null,
+   "expect": {
+    "rate": 1.75,
+    "successes": 0,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 0,
+    "blocked": false
+   }
+  },
+  {
+   "now": 6,
+   "signal": "healthy",
+   "retry_after": null,
+   "expect": {
+    "rate": 1.75,
+    "successes": 1,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 0,
+    "blocked": false
+   }
+  },
+  {
+   "now": 7,
+   "signal": "healthy",
+   "retry_after": null,
+   "expect": {
+    "rate": 2.0,
+    "successes": 0,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 0,
+    "blocked": false
+   }
+  },
+  {
+   "now": 8,
+   "signal": "healthy",
+   "retry_after": null,
+   "expect": {
+    "rate": 2.0,
+    "successes": 1,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 0,
+    "blocked": false
+   }
+  },
+  {
+   "now": 9,
+   "signal": "healthy",
+   "retry_after": null,
+   "expect": {
+    "rate": 2.0,
+    "successes": 0,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 0,
+    "blocked": false
+   }
+  },
+  {
+   "now": 10,
+   "signal": "throttle",
+   "retry_after": null,
+   "expect": {
+    "rate": 1.0,
+    "successes": 0,
+    "failures": 1,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 0,
+    "blocked": false
+   }
+  },
+  {
+   "now": 11,
+   "signal": "throttle",
+   "retry_after": null,
+   "expect": {
+    "rate": 0.5,
+    "successes": 0,
+    "failures": 2,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 0,
+    "blocked": false
+   }
+  },
+  {
+   "now": 12,
+   "signal": "server_error",
+   "retry_after": null,
+   "expect": {
+    "rate": 0.5,
+    "successes": 0,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 20,
+    "paused_until": 22,
+    "blocked": false
+   }
+  },
+  {
+   "now": 30,
+   "signal": "throttle",
+   "retry_after": 5,
+   "expect": {
+    "rate": 0.25,
+    "successes": 0,
+    "failures": 1,
+    "blocks": 0,
+    "cooldown": 20,
+    "paused_until": 35,
+    "blocked": false
+   }
+  },
+  {
+   "now": 31,
+   "signal": "throttle",
+   "retry_after": 1000,
+   "expect": {
+    "rate": 0.125,
+    "successes": 0,
+    "failures": 2,
+    "blocks": 0,
+    "cooldown": 20,
+    "paused_until": 91,
+    "blocked": false
+   }
+  },
+  {
+   "now": 32,
+   "signal": "throttle",
+   "retry_after": null,
+   "expect": {
+    "rate": 0.0625,
+    "successes": 0,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 25,
+    "paused_until": 91,
+    "blocked": false
+   }
+  },
+  {
+   "now": 33,
+   "signal": "throttle",
+   "retry_after": null,
+   "expect": {
+    "rate": 0.05,
+    "successes": 0,
+    "failures": 1,
+    "blocks": 0,
+    "cooldown": 25,
+    "paused_until": 91,
+    "blocked": false
+   }
+  },
+  {
+   "now": 100,
+   "signal": "healthy",
+   "retry_after": null,
+   "expect": {
+    "rate": 0.05,
+    "successes": 1,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 91,
+    "blocked": false
+   }
+  },
+  {
+   "now": 101,
+   "signal": "blocked",
+   "retry_after": null,
+   "expect": {
+    "rate": 0.05,
+    "successes": 0,
+    "failures": 0,
+    "blocks": 1,
+    "cooldown": 10,
+    "paused_until": 91,
+    "blocked": false
+   }
+  },
+  {
+   "now": 102,
+   "signal": "healthy",
+   "retry_after": null,
+   "expect": {
+    "rate": 0.05,
+    "successes": 1,
+    "failures": 0,
+    "blocks": 0,
+    "cooldown": 10,
+    "paused_until": 91,
+    "blocked": false
+   }
+  },
+  {
+   "now": 103,
+   "signal": "blocked",
+   "retry_after": null,
+   "expect": {
+    "rate": 0.05,
+    "successes": 0,
+    "failures": 0,
+    "blocks": 1,
+    "cooldown": 10,
+    "paused_until": 91,
+    "blocked": false
+   }
+  },
+  {
+   "now": 104,
+   "signal": "blocked",
+   "retry_after": null,
+   "expect": {
+    "rate": 0.05,
+    "successes": 0,
+    "failures": 0,
+    "blocks": 2,
+    "cooldown": 10,
+    "paused_until": 91,
+    "blocked": true
+   }
+  }
+ ]
+}

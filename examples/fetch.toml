@@ -1,0 +1,17 @@
+# Fetch a list of URLs politely and record what happened to each.
+# Python: python -m webaccess run examples/fetch.toml --input urls.txt
+# Rust:   webaccess run examples/fetch.toml --input urls.txt
+
+[resources]
+level = "low"            # "low" (default) | "balanced" | "max"
+
+[engine]
+log_path = "out/events.jsonl"
+
+[goal]
+type = "fetch"
+urls = ["https://example.com/"]
+
+[[sinks]]
+type = "jsonl"
+path = "out/fetch.jsonl"

@@ -1,0 +1,65 @@
+{
+ "description": "Response.text() with this content-type header and body bytes (hex) -> text.",
+ "cases": [
+  {
+   "name": "default is UTF-8",
+   "content_type": "text/html",
+   "body_hex": "68c3a96c6c6f20e697a5e69cac",
+   "text": "héllo 日本"
+  },
+  {
+   "name": "header charset",
+   "content_type": "text/html; charset=ISO-8859-1",
+   "body_hex": "636166e9",
+   "text": "café"
+  },
+  {
+   "name": "meta charset",
+   "content_type": "text/html",
+   "body_hex": "3c6d65746120636861727365743d2273686966745f6a6973223e3c703e93fa967b8cea",
+   "text": "<meta charset=\"shift_jis\"><p>日本語"
+  },
+  {
+   "name": "meta http-equiv",
+   "content_type": "",
+   "body_hex": "3c6d65746120687474702d65717569763d22436f6e74656e742d547970652220636f6e74656e743d22746578742f68746d6c3b20636861727365743d67626b223ed6d0cec4",
+   "text": "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=gbk\">中文"
+  },
+  {
+   "name": "header wins over meta",
+   "content_type": "text/html; charset=utf-8",
+   "body_hex": "3c6d65746120636861727365743d2273686966745f6a6973223ee697a5e69cac",
+   "text": "<meta charset=\"shift_jis\">日本"
+  },
+  {
+   "name": "UTF-8 BOM is stripped",
+   "content_type": "text/plain",
+   "body_hex": "efbbbf6f6b",
+   "text": "ok"
+  },
+  {
+   "name": "EUC-KR",
+   "content_type": "text/html; charset=euc-kr",
+   "body_hex": "c7d1b1b9beee",
+   "text": "한국어"
+  },
+  {
+   "name": "windows-1251",
+   "content_type": "text/html; charset=windows-1251",
+   "body_hex": "cff0e8e2e5f2",
+   "text": "Привет"
+  },
+  {
+   "name": "unknown label falls back to UTF-8",
+   "content_type": "text/html; charset=nonsense",
+   "body_hex": "6f6b20e29c93",
+   "text": "ok ✓"
+  },
+  {
+   "name": "invalid bytes become U+FFFD",
+   "content_type": "text/plain; charset=utf-8",
+   "body_hex": "6f6bff",
+   "text": "ok�"
+  }
+ ]
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "fetch-record.schema.json",
+  "title": "Record emitted by the built-in fetch goal",
+  "type": "object",
+  "required": ["url", "final_url", "status", "outcome", "attempts", "elapsed_ms", "bytes", "error"],
+  "properties": {
+    "url": {"type": "string"},
+    "final_url": {"type": "string"},
+    "status": {"type": ["integer", "null"]},
+    "outcome": {"enum": ["ok", "not_found", "auth_required", "client_error", "blocked", "host_blocked",
+                         "robots_disallowed", "insecure", "unsafe", "failed", "invalid"]},
+    "attempts": {"type": "integer", "minimum": 0},
+    "elapsed_ms": {"type": "integer", "minimum": 0},
+    "bytes": {"type": "integer", "minimum": 0},
+    "error": {"type": ["string", "null"]}
+  }
+}

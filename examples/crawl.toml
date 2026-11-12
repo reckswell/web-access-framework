@@ -1,0 +1,28 @@
+# Crawl a site two links deep and pull a few fields from every page.
+# Python: python -m webaccess run examples/crawl.toml
+# Rust:   webaccess run examples/crawl.toml
+
+[resources]
+level = "balanced"
+
+[host]
+max_rate = 2.0           # be gentle: at most 2 requests/second per site
+
+[goal]
+type = "crawl"
+seeds = ["https://books.toscrape.com/"]
+max_depth = 2
+max_pages = 200
+
+[goal.fields]
+title = "title"
+heading = "h1"
+first_image = "img@src"
+
+[[sinks]]
+type = "csv"
+path = "out/crawl.csv"
+
+[[sinks]]
+type = "jsonl"
+path = "out/crawl.jsonl"
