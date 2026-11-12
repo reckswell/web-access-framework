@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "event.schema.json",
+  "title": "Event log line",
+  "type": "object",
+  "required": ["ts", "event"],
+  "properties": {
+    "ts": {"type": "number"},
+    "event": {"enum": ["request", "retry", "host_rate", "host_paused", "host_blocked", "summary"]}
+  },
+  "allOf": [
+    {"if": {"properties": {"event": {"const": "request"}}},
+     "then": {"required": ["url", "host", "status", "outcome", "attempts", "elapsed_ms", "error"]}},
+    {"if": {"properties": {"event": {"const": "retry"}}},
+     "then": {"required": ["url", "host", "attempt", "delay", "reason"]}},
+    {"if": {"properties": {"event": {"const": "host_rate"}}}, "then": {"required": ["host", "rate"]}},
+    {"if": {"properties": {"event": {"const": "host_paused"}}}, "then": {"required": ["host", "seconds", "reason"]}},
+    {"if": {"properties": {"event": {"const": "host_blocked"}}}, "then": {"required": ["host"]}},
+    {"if": {"properties": {"event": {"const": "summary"}}},
+     "then": {"required": ["elapsed", "finished", "requests", "outcomes", "hosts", "blocked_hosts"]}}
+  ]
+}
