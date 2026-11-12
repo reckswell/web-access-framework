@@ -84,3 +84,26 @@ fn host_overrides() {
     assert_eq!(cfg.host_config("example.com:8080").max_rate, 2.0);
     assert_eq!(cfg.host_config("other.com").max_rate, 5.0);
 }
+
+#[test]
+fn safety() {
+    for c in load("safety.json")["cases"].as_array().unwrap() {
+        let domains: Vec<String> = c["blocked_domains"].as_array().unwrap().iter().map(|d| d.as_str().unwrap().into()).collect();
+        let s = webaccess::safety::Safety::new(c["https_only"].as_bool().unwrap(), &domains, c["blocklist"].as_str().unwrap());
+        for check in c["checks"].as_array().unwrap() {
+            assert_eq!(s.check(check[0].as_str().unwrap()).map(String::from), self::s(&check[1]), "{}", check[0]);
+        }
+    }
+}
+
+#[test]
+fn text_decode() {
+    for c in load("text_decode.json")["cases"].as_array().unwrap() {
+        let hex = c["body_hex"].as_str().unwrap();
+        let body = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect();
+        let mut r = webaccess::Response::bare(webaccess::Task::new("https://x.example/"), "ok", 1);
+        r.headers.insert("content-type".into(), c["content_type"].as_str().unwrap().into());
+        r.body = body;
+        assert_eq!(r.text(), c["text"].as_str().unwrap(), "{}", c["name"]);
+    }
+}

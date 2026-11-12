@@ -6,6 +6,7 @@ pub mod goals;
 pub mod limits;
 pub mod model;
 pub mod robots;
+pub mod safety;
 pub mod sinks;
 pub mod urls;
 

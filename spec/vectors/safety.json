@@ -1,0 +1,94 @@
+{
+ "description": "safety(url) with the given engine settings -> 'insecure', 'unsafe' or null. `blocklist` is the text of one blocklist file.",
+ "cases": [
+  {
+   "https_only": true,
+   "blocked_domains": [],
+   "blocklist": "",
+   "checks": [
+    [
+     "https://example.com/",
+     null
+    ],
+    [
+     "http://example.com/",
+     "insecure"
+    ],
+    [
+     "HTTP://example.com:8080/x",
+     "insecure"
+    ]
+   ]
+  },
+  {
+   "https_only": false,
+   "blocked_domains": [
+    "bad.example",
+    "Evil.Example"
+   ],
+   "blocklist": "",
+   "checks": [
+    [
+     "http://example.com/",
+     null
+    ],
+    [
+     "https://bad.example/",
+     "unsafe"
+    ],
+    [
+     "https://www.bad.example/x",
+     "unsafe"
+    ],
+    [
+     "https://notbad.example/",
+     null
+    ],
+    [
+     "https://bad.example.com/",
+     null
+    ],
+    [
+     "https://evil.example:8443/",
+     "unsafe"
+    ]
+   ]
+  },
+  {
+   "https_only": true,
+   "blocked_domains": [],
+   "blocklist": "# hosts-file format\n127.0.0.1 localhost\n0.0.0.0 malware.example  # comment\nphish.example\n\n",
+   "checks": [
+    [
+     "https://malware.example/",
+     "unsafe"
+    ],
+    [
+     "https://a.phish.example/",
+     "unsafe"
+    ],
+    [
+     "https://localhost/",
+     null
+    ],
+    [
+     "http://malware.example/",
+     "insecure"
+    ]
+   ]
+  },
+  {
+   "https_only": true,
+   "blocked_domains": [
+    "xn--bcher-kva.example"
+   ],
+   "blocklist": "",
+   "checks": [
+    [
+     "https://Bücher.example/",
+     "unsafe"
+    ]
+   ]
+  }
+ ]
+}

@@ -20,7 +20,12 @@ pub fn classify(status: Option<u16>, error: Option<&str>, body: &[u8]) -> (&'sta
         return ("blocked", "blocked", false);
     }
     let Some(s) = status else {
-        return if error == Some("redirects") { ("client_error", "healthy", false) } else { ("failed", "throttle", true) };
+        return match error {
+            Some("insecure") => ("insecure", "healthy", false), // redirect hops refused by the safety check
+            Some("unsafe") => ("unsafe", "healthy", false),
+            Some("redirects") => ("client_error", "healthy", false),
+            _ => ("failed", "throttle", true),
+        };
     };
     match s {
         200..=399 => ("ok", "healthy", false),

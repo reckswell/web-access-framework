@@ -47,6 +47,11 @@
    "host": "example.com"
   },
   {
+   "in": "https://Bücher.example/a",
+   "out": "https://xn--bcher-kva.example/a",
+   "host": "xn--bcher-kva.example"
+  },
+  {
    "in": "http://127.0.0.1:5000/ok",
    "out": "http://127.0.0.1:5000/ok",
    "host": "127.0.0.1:5000"

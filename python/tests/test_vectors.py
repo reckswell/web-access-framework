@@ -4,7 +4,9 @@ from pathlib import Path
 import pytest
 from webaccess.config import Config, HostConfig
 from webaccess.limits import Host, classify, parse_retry_after
+from webaccess.model import Response, Task
 from webaccess.robots import Robots
+from webaccess.safety import Safety
 from webaccess.urls import host_key, join, normalize
 
 VECTORS = Path(__file__).resolve().parents[2] / "spec" / "vectors"
@@ -63,3 +65,17 @@ def test_host_overrides():
     cfg = Config.from_dict({"host": {"max_rate": 5.0}, "hosts": {"Example.com": {"max_rate": 2.0}}})
     assert cfg.host_config("example.com:8080").max_rate == 2.0
     assert cfg.host_config("other.com").max_rate == 5.0
+
+
+@pytest.mark.parametrize("case", load("safety.json")["cases"], ids=lambda c: str(c["checks"][0][0]))
+def test_safety(case):
+    s = Safety(case["https_only"], case["blocked_domains"], blocklist_text=case["blocklist"])
+    for url, want in case["checks"]:
+        assert s.check(url) == want, url
+
+
+@pytest.mark.parametrize("v", load("text_decode.json")["cases"], ids=lambda v: v["name"])
+def test_text_decode(v):
+    r = Response(Task("https://x.example/"), "https://x.example/", 200, "ok",
+                 {"content-type": v["content_type"]}, bytes.fromhex(v["body_hex"]))
+    assert r.text() == v["text"]

@@ -14,6 +14,9 @@ max_memory_mb = 0              # soft memory budget for in-flight responses; 0 =
 user_agent = "web-access-framework/0.1 (+https://github.com/reckswell/web-access-framework)"
 robots_agent = "web-access-framework"   # product token matched against robots.txt groups
 respect_robots = true
+https_only = true              # refuse http:// URLs and redirects to http:// (outcome `insecure`)
+blocked_domains = []           # never contact these hosts or their subdomains (outcome `unsafe`)
+blocklist_files = []           # more blocked domains: one per line, or hosts-file lines ("0.0.0.0 bad.example")
 request_timeout = 30.0         # seconds per attempt, connect + full body
 max_body_bytes = 10485760      # bodies are truncated beyond this
 max_redirects = 10
@@ -62,7 +65,11 @@ path = "out/records.jsonl"
 - **Header names** are case-insensitive; implementations SHOULD lower-case them when merging.
 - `initial_rate` is clamped to `[min_rate, max_rate]`. If robots.txt gives a `Crawl-delay` of `d` seconds,
   the host's `max_rate` becomes `min(max_rate, 1/d)` and its current rate is clamped to that.
-- Relative sink and log paths resolve against the current working directory. Parent folders are created.
+- **Blocked domains** match a URL's host (lower-cased, IDNA/punycode form, no port) when it equals an entry
+  or ends with `.` + entry. In `blocklist_files`, `#` starts a comment, the last whitespace-separated token
+  of each line is the domain, and tokens without a `.` (such as `localhost`) are skipped. Public lists in
+  hosts format (malware and phishing feeds) work as-is.
+- Relative sink and log paths, and `blocklist_files`, resolve against the current working directory. Parent folders of outputs are created.
 
 ## Resources
 

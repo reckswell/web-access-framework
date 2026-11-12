@@ -9,7 +9,7 @@
     "final_url": {"type": "string"},
     "status": {"type": ["integer", "null"]},
     "outcome": {"enum": ["ok", "not_found", "auth_required", "client_error", "blocked", "host_blocked",
-                         "robots_disallowed", "failed", "invalid"]},
+                         "robots_disallowed", "insecure", "unsafe", "failed", "invalid"]},
     "attempts": {"type": "integer", "minimum": 0},
     "elapsed_ms": {"type": "integer", "minimum": 0},
     "bytes": {"type": "integer", "minimum": 0},

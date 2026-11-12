@@ -57,12 +57,18 @@ Out of scope by design: hiding automation from sites (fingerprint spoofing, stea
 solving, proxy rotation to evade bans or rate limits) and automating ticket queues or purchases. When a
 site challenges or blocks the client, the engine stops contacting that host and reports it.
 
+Safety defaults: only `https://` URLs are fetched (`https_only = true`, which also covers redirects), and
+`blocked_domains` / `blocklist_files` (hosts-file format, so public malware and phishing lists work as-is)
+keep the engine away from unsafe sites.
+
 ## Roadmap
 
-1. **Core engine** (this release): scheduler, per-host adaptive limits, robots.txt, retries, `fetch` and
-   `crawl` goals, JSONL/CSV output, event log, resource levels, conformance suite, CI on 3 OSes.
+1. **Core engine** (this release): scheduler, per-host adaptive limits, robots.txt, retries, HTTPS-only and
+   blocklists, international domains and page encodings, `fetch` and `crawl` goals, JSONL/CSV output,
+   event log, resource levels, conformance suite, CI on 3 OSes.
 2. Browser tier: Playwright pool for JavaScript pages, ad/overlay blocking, screenshots.
 3. Sessions: saved browser profiles, manual login, credential login from config, live-window handoff.
 4. Extraction chain: structured data, readability, model plugins (text and vision).
-5. More goals and sinks: browser agent (games), watch/notify, Parquet, SQLite, Postgres, S3.
+5. More goals and sinks: multi-engine search via official APIs ([spec](spec/10-search.md)), browser agent
+   (games), watch/notify, Parquet, SQLite, Postgres, S3.
 6. Scale-out: shared queue across machines, benchmarks.

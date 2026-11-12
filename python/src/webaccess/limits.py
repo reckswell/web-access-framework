@@ -23,6 +23,8 @@ def classify(status, error, body=b""):
     """One attempt -> (outcome, signal, retry)."""
     if status in (403, 429, 503) and is_challenge(body):
         return "blocked", "blocked", False
+    if error in ("insecure", "unsafe"):  # a redirect hop refused by the safety check
+        return error, "healthy", False
     if error:
         return ("client_error", "healthy", False) if error == "redirects" else ("failed", "throttle", True)
     if 200 <= status < 400:

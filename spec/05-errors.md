@@ -3,8 +3,9 @@
 ## Classification
 
 `classify(status, error, body)` maps one attempt to `(outcome, signal, retry)`. Exactly one of
-`status` / `error` is set. `error` is one of `timeout`, `network` (DNS, connect, reset, TLS, protocol)
-or `redirects` (more than `max_redirects`). Vectors: [vectors/classify.json](vectors/classify.json).
+`status` / `error` is set. `error` is one of `timeout`, `network` (DNS, connect, reset, TLS, protocol),
+`redirects` (more than `max_redirects`), or `insecure` / `unsafe` (a redirect hop refused by the safety
+check in [03-engine.md](03-engine.md)). Vectors: [vectors/classify.json](vectors/classify.json).
 
 Rows are checked top to bottom; the first match wins.
 
@@ -13,6 +14,8 @@ Rows are checked top to bottom; the first match wins.
 | status in {403, 429, 503} and body is a **challenge** | `blocked` | `blocked` | no |
 | error `timeout` or `network` | `failed` | `throttle` | yes |
 | error `redirects` | `client_error` | `healthy` | no |
+| error `insecure` | `insecure` | `healthy` | no |
+| error `unsafe` | `unsafe` | `healthy` | no |
 | 200–399 | `ok` | `healthy` | no |
 | 401 | `auth_required` | `healthy` | no |
 | 403 | `blocked` | `blocked` | no |

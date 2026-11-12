@@ -6,7 +6,8 @@
 [vectors/url_normalize.json](vectors/url_normalize.json).
 
 1. Parse the URL. If parsing fails, or the scheme is not `http`/`https`, or there is no host → `invalid`.
-2. Lower-case the scheme and host.
+2. Lower-case the scheme and host. Convert an internationalized host to its IDNA (punycode) form, e.g.
+   `bücher.example` → `xn--bcher-kva.example`.
 3. Drop the port if it is the scheme default (80 for http, 443 for https).
 4. An empty path becomes `/`.
 5. Drop the fragment (`#...`) and any userinfo (`user:password@`).
@@ -20,6 +21,17 @@ keyed by it. `join(base, href)` resolves a relative reference per RFC 3986 §5.
 The engine keeps a set of normalized URLs seen this run. A task with `dedup = true` and method `GET`
 whose normalized URL is already in the set is dropped silently (no Response, no Record). Retries of a
 task never count as duplicates.
+
+## Safety checks
+
+`safety(url)` returns `insecure`, `unsafe` or nothing (vectors: [vectors/safety.json](vectors/safety.json)):
+
+1. If `engine.https_only` and the scheme is not `https` → `insecure`.
+2. If the host matches a blocked domain ([02-config.md](02-config.md)) → `unsafe`.
+
+It runs when a task is added (after dedup; a failing task finishes at once with that outcome and is
+never queued) and again on **every redirect hop** before it is followed. A refused hop ends the attempt
+with error `insecure` / `unsafe` ([05-errors.md](05-errors.md)); nothing is sent to the refused URL.
 
 ## Frontier
 

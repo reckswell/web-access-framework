@@ -11,10 +11,15 @@ from .frontier import Frontier
 from .limits import Host, backoff, classify, parse_retry_after
 from .model import Response, Task
 from .robots import DENY_ALL, Robots
+from .safety import Safety
 from .sinks import make_sinks
 from .urls import host_key, normalize
 
 INF = float("inf")
+
+
+class Refused(Exception):
+    """A redirect hop refused by the safety check; args[0] is `insecure` or `unsafe`."""
 
 
 def open_file_limit():
@@ -36,6 +41,7 @@ class Engine:
         self.cfg, self.goal = config, goal
         self.sinks = sinks if sinks is not None else make_sinks(config.sinks)
         self.frontier, self.hosts, self.seen = Frontier(), {}, set()
+        self.safety = Safety.from_config(config.engine)
         self.outstanding = self.requests = self.finished = 0
         self.outcomes, self.blocked_hosts, self.wake = {}, [], asyncio.Event()
         log = config.engine.log_path
@@ -52,8 +58,8 @@ class Engine:
                 return
             self.seen.add(key)
         self.outstanding += 1
-        if not key:
-            return self._finish(Response(task, task.url, None, "invalid"))
+        if refused := ("invalid" if not key else self.safety.check(task.url)):
+            return self._finish(Response(task, task.url, None, refused))
         hk = host_key(task.url)
         host = self.hosts.get(hk) or self.hosts.setdefault(hk, Host(hk, self.cfg.host_config(hk)))
         self.frontier.push(host, task)
@@ -68,11 +74,17 @@ class Engine:
         self.slots, self.running, self.start = asyncio.Semaphore(workers), set(), time.monotonic()
         self.timeout = aiohttp.ClientTimeout(total=e.request_timeout)
         self.headers = {**e.headers, "user-agent": e.user_agent}
+        async def guard(req, handler):  # runs on every hop, so redirects are checked too
+            if refused := self.safety.check(str(req.url)):
+                raise Refused(refused)
+            return await handler(req)
+
         connector = aiohttp.TCPConnector(limit=workers, ttl_dns_cache=300,
                                          ssl=ssl.create_default_context(cafile=certifi.where()))
         stats = asyncio.create_task(self._stats()) if e.stats_interval > 0 else None
         try:
-            async with aiohttp.ClientSession(connector=connector, timeout=self.timeout, trust_env=True) as self.session:
+            async with aiohttp.ClientSession(connector=connector, timeout=self.timeout, trust_env=True,
+                                         middlewares=(guard,)) as self.session:
                 for task in self.goal.start():
                     self.add(task)
                 await self._dispatch()
@@ -154,6 +166,8 @@ class Engine:
                     if len(buf) >= cap:
                         break
                 body = bytes(buf[:cap])
+        except Refused as exc:
+            error = exc.args[0]
         except aiohttp.TooManyRedirects:
             error = "redirects"
         except asyncio.TimeoutError:
@@ -183,7 +197,7 @@ class Engine:
                                         max_redirects=5) as r:
                 text = await r.text(errors="replace") if r.status < 300 else ""
                 status = r.status
-        except (asyncio.TimeoutError, aiohttp.ClientError, OSError):
+        except (asyncio.TimeoutError, aiohttp.ClientError, OSError, Refused):
             status = 599
         if status >= 500:
             return Robots(DENY_ALL), time.monotonic() + self.cfg.engine.robots_error_ttl

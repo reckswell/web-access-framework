@@ -28,6 +28,7 @@ When a site challenges or blocks us, the engine stops contacting that host and r
 | [07-observability.md](07-observability.md) | Event log, progress line, run summary |
 | [08-cli.md](08-cli.md) | Command-line contract every implementation exposes |
 | [09-platforms.md](09-platforms.md) | Ubuntu, Windows, other Linux and macOS rules |
+| [10-search.md](10-search.md) | Languages, and the multi-engine search goal (planned) |
 | [schemas/](schemas/) | JSON Schemas for tasks, fetch records and events |
 | [vectors/](vectors/) | Shared test vectors every implementation MUST pass |
 
@@ -43,12 +44,12 @@ An implementation is conformant when it:
 
 Implement modules in this order; each has vectors or conformance cases you can test against immediately.
 
-1. `urls` — normalize, host key, join (vectors: `url_normalize.json`).
+1. `urls` — normalize, host key, join (vectors: `url_normalize.json`); `safety` (vectors: `safety.json`).
 2. `classify` — status/error → outcome, signal, retry (vectors: `classify.json`).
 3. `limiter` — per-host AIMD state machine (vectors: `limiter.json`).
 4. `robots` — parser and matcher (vectors: `robots.json`).
 5. `config` — TOML loading with defaults ([02-config.md](02-config.md)).
-6. `frontier` + `engine` — scheduling, retries, events.
+6. `frontier` + `engine` — scheduling, retries, events; `Response.text()` (vectors: `text_decode.json`).
 7. `sinks`, `goals`, `cli` — then run the conformance suite.
 
 Keep module and field names identical to the spec (adjusting only case conventions, e.g. `max_rate` /

@@ -95,7 +95,10 @@ def main():
             continue
         server, _, base = serve()  # fresh server per case: clean hit counters
         with tempfile.TemporaryDirectory() as tmp:
-            vars = {"base": base, "BASE": base.replace("http://", "HTTP://"), "tmp": Path(tmp).as_posix()}
+            vars = {"base": base, "BASE": base.replace("http://", "HTTP://"), "tmp": Path(tmp).as_posix(),
+                    "LOCAL": base.replace("127.0.0.1", "localhost")}
+            for name, text in case.get("files", {}).items():
+                Path(tmp, name).write_text(text, encoding="utf-8")
             cfg, out, inp = Path(tmp, "config.toml"), Path(tmp, "out.jsonl"), Path(tmp, "input.txt")
             cfg.write_text(toml(subst(merge(spec["base_config"], case["config"]), vars)), encoding="utf-8")
             inp.write_text("\n".join(subst(case["urls"], vars)) + "\n", encoding="utf-8")

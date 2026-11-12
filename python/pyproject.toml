@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Fast, polite, parallel web access engine that goals (scrapers, watchers, agents) build on."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["aiohttp>=3.9", "selectolax>=1.0", "certifi"]
+dependencies = ["aiohttp>=3.12", "selectolax>=1.0", "certifi"]
 
 [project.optional-dependencies]
 fast = ["uvloop>=0.19; sys_platform != 'win32'"]

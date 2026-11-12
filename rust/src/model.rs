@@ -1,7 +1,9 @@
 //! Task, Response and goal Output (spec/01-model.md).
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use regex::bytes::Regex;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::LazyLock;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
@@ -49,12 +51,15 @@ impl Response {
                attempts, elapsed_ms: 0, error: None }
     }
 
-    /// Body decoded with the content-type charset, else UTF-8 (invalid bytes replaced).
+    /// Decode by BOM, then content-type charset, then <meta> charset, then UTF-8 (spec/01-model.md).
     pub fn text(&self) -> String {
-        let label = self.headers.get("content-type").and_then(|c| c.split("charset=").nth(1))
-            .map(|c| c.split(';').next().unwrap_or("").trim()).unwrap_or("utf-8");
-        let enc = encoding_rs::Encoding::for_label(label.as_bytes()).unwrap_or(encoding_rs::UTF_8);
-        enc.decode(&self.body).0.into_owned()
+        static CHARSET: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)charset\s*=\s*["']?\s*([\w.:-]+)"#).unwrap());
+        static META: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)<meta[^>]+charset\s*=\s*["']?\s*([\w.:-]+)"#).unwrap());
+        let ctype = self.headers.get("content-type").map_or(&[][..], |c| c.as_bytes());
+        let head = &self.body[..self.body.len().min(1024)];
+        let label = CHARSET.captures(ctype).or_else(|| META.captures(head)).map_or(&b"utf-8"[..], |c| c.get(1).unwrap().as_bytes());
+        let enc = encoding_rs::Encoding::for_label(label).unwrap_or(encoding_rs::UTF_8);
+        enc.decode(&self.body).0.into_owned() // decode() also honors and strips a BOM
     }
 
     pub fn json(&self) -> serde_json::Result<Value> {

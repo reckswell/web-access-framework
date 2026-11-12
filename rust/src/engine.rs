@@ -5,6 +5,7 @@ use crate::goals::Goal;
 use crate::limits::{backoff, classify, parse_retry_after, Host};
 use crate::model::{Output, Response, Task};
 use crate::robots::{Robots, DENY_ALL};
+use crate::safety::Safety;
 use crate::sinks::Sink;
 use crate::urls::{host_key, normalize};
 use serde_json::{json, Map, Value};
@@ -32,6 +33,7 @@ struct Inner {
     cfg: Config,
     goal: Arc<dyn Goal>,
     client: reqwest::Client,
+    safety: Arc<Safety>,
     state: Mutex<State>,
     sinks: Mutex<Vec<Box<dyn Sink>>>,
     log: Mutex<Option<BufWriter<File>>>,
@@ -41,6 +43,14 @@ struct Inner {
 }
 
 pub struct Engine(Arc<Inner>);
+
+/// A redirect hop refused by the safety check (`insecure` or `unsafe`).
+#[derive(Debug)]
+struct Refused(&'static str);
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "refused redirect: {}", self.0) }
+}
+impl std::error::Error for Refused {}
 
 fn unix_now() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
@@ -58,10 +68,16 @@ impl Engine {
         let headers = e.headers.iter()
             .filter_map(|(k, v)| Some((k.parse::<reqwest::header::HeaderName>().ok()?, v.parse().ok()?))).collect();
         let workers = cfg.workers(open_file_limit(), None);
+        let safety = Arc::new(Safety::from_config(e)?);
+        let (guard, max_redirects) = (safety.clone(), e.max_redirects);
+        let redirects = reqwest::redirect::Policy::custom(move |hop| { // every hop passes the safety check
+            if hop.previous().len() > max_redirects { return hop.error("too many redirects") }
+            match guard.check(hop.url().as_str()) { Some(why) => hop.error(Refused(why)), None => hop.follow() }
+        });
         let client = reqwest::Client::builder()
             .user_agent(&e.user_agent).default_headers(headers).cookie_store(true)
             .timeout(Duration::from_secs_f64(e.request_timeout))
-            .redirect(reqwest::redirect::Policy::limited(e.max_redirects))
+            .redirect(redirects)
             .pool_max_idle_per_host(workers.min(64))
             .build().map_err(|err| err.to_string())?;
         let log = if e.log_path.is_empty() { None } else {
@@ -71,7 +87,7 @@ impl Engine {
             Some(BufWriter::new(File::create(&e.log_path).map_err(|err| format!("{}: {err}", e.log_path))?))
         };
         Ok(Self(Arc::new(Inner {
-            goal, client, state: Default::default(), sinks: Mutex::new(sinks), log: Mutex::new(log),
+            goal, client, safety, state: Default::default(), sinks: Mutex::new(sinks), log: Mutex::new(log),
             wake: Notify::new(), slots: Arc::new(Semaphore::new(workers)), start: Instant::now(), cfg,
         })))
     }
@@ -124,9 +140,10 @@ impl Inner {
             }
         }
         s.outstanding += 1;
-        let Some(hk) = key.and_then(|_| host_key(&task.url)) else {
+        let refused = if key.is_none() { Some("invalid") } else { self.safety.check(&task.url) };
+        let (Some(hk), None) = (host_key(&task.url), refused) else {
             drop(s);
-            return self.finish(Response::bare(task, "invalid", 0));
+            return self.finish(Response::bare(task, refused.unwrap_or("invalid"), 0));
         };
         let h = match s.index.get(&hk) {
             Some(&h) => h,
@@ -252,7 +269,10 @@ impl Inner {
             Ok((status, url, headers, body)) =>
                 Response { task, url, status: Some(status), outcome: "", headers, body, attempts, elapsed_ms, error: None },
             Err(e) => {
-                let error = if e.is_timeout() { "timeout".into() } else if e.is_redirect() { "redirects".into() }
+                let refused = std::iter::successors(std::error::Error::source(&e), |s| s.source())
+                    .find_map(|s| s.downcast_ref::<Refused>()).map(|r| r.0);
+                let error = if e.is_timeout() { "timeout".into() } else if let Some(why) = refused { why.into() }
+                            else if e.is_redirect() { "redirects".into() }
                             else { format!("network: {}", if e.is_connect() { "connect" } else { "request" }) };
                 Response { error: Some(error), elapsed_ms, ..Response::bare(task, "", attempts) }
             }

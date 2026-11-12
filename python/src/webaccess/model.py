@@ -1,7 +1,10 @@
 """Task and Response (spec/01-model.md)."""
-import json
+import codecs, json, re
 from dataclasses import dataclass, field, fields, replace
 from .urls import join
+
+CHARSET = re.compile(rb"charset\s*=\s*[\"']?\s*([\w.:-]+)", re.I)
+META_CHARSET = re.compile(rb"<meta[^>]+charset\s*=\s*[\"']?\s*([\w.:-]+)", re.I)
 
 
 @dataclass
@@ -34,12 +37,16 @@ class Response:
     error: str | None = None
 
     def text(self):
-        ctype = self.headers.get("content-type", "")
-        charset = ctype.split("charset=")[-1].split(";")[0].strip() if "charset=" in ctype else "utf-8"
+        """Decode by BOM, then content-type charset, then <meta> charset, then UTF-8 (spec/01-model.md)."""
+        b = self.body
+        for bom, enc in ((codecs.BOM_UTF8, "utf-8"), (codecs.BOM_UTF16_LE, "utf-16-le"), (codecs.BOM_UTF16_BE, "utf-16-be")):
+            if b.startswith(bom):
+                return b[len(bom):].decode(enc, "replace")
+        m = CHARSET.search(self.headers.get("content-type", "").encode()) or META_CHARSET.search(b[:1024])
         try:
-            return self.body.decode(charset, "replace")
-        except LookupError:
-            return self.body.decode("utf-8", "replace")
+            return b.decode(m.group(1).decode() if m else "utf-8", "replace")
+        except LookupError:  # unknown label
+            return b.decode("utf-8", "replace")
 
     def json(self):
         return json.loads(self.body)

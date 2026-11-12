@@ -24,6 +24,11 @@ pub fn host_key(raw: &str) -> Option<String> {
     Some(u.port().map_or_else(|| host.to_string(), |p| format!("{host}:{p}"))) // port() is None when default
 }
 
+/// Normalized host without the port.
+pub fn host_name(raw: &str) -> Option<String> {
+    parse(raw)?.host_str().map(String::from)
+}
+
 pub fn join(base: &str, href: &str) -> Option<String> {
     Url::parse(base).ok()?.join(href.trim()).ok().map(String::from)
 }

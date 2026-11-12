@@ -1,9 +1,10 @@
 {
- "description": "Cases for run.py. {base} = mock server URL, {BASE} = same with an upper-case scheme, {tmp} = case temp dir. Every case also gets base_config.",
+ "description": "Cases for run.py. {base} = mock server URL, {BASE} = same with an upper-case scheme, {tmp} = case temp dir, {LOCAL} = the same server named as localhost. `files` are written into {tmp} first. Every case also gets base_config.",
  "base_config": {
   "engine": {
    "request_timeout": 2.0,
-   "stats_interval": 0
+   "stats_interval": 0,
+   "https_only": false
   },
   "host": {
    "initial_rate": 50.0,
@@ -281,6 +282,81 @@
       "missing": null
      }
     ]
+   }
+  },
+  {
+   "name": "https_only refuses plain http",
+   "config": {
+    "engine": {
+     "https_only": true
+    }
+   },
+   "urls": [
+    "{base}/ok"
+   ],
+   "expect": {
+    "records": [
+     {
+      "url": "{base}/ok",
+      "outcome": "insecure",
+      "status": null,
+      "attempts": 0
+     }
+    ],
+    "hits": {
+     "/ok": 0,
+     "/robots.txt": 0
+    }
+   }
+  },
+  {
+   "name": "blocked domains, blocklist files and redirect hops",
+   "config": {
+    "engine": {
+     "blocked_domains": [
+      "localhost"
+     ],
+     "blocklist_files": [
+      "{tmp}/block.txt"
+     ]
+    }
+   },
+   "files": {
+    "block.txt": "# hosts format\n0.0.0.0 blocked.example\n"
+   },
+   "urls": [
+    "{base}/ok",
+    "{LOCAL}/ok?direct=1",
+    "http://www.blocked.example/",
+    "{base}/redirect?to={LOCAL}/ok"
+   ],
+   "expect": {
+    "records": [
+     {
+      "url": "{base}/ok",
+      "outcome": "ok"
+     },
+     {
+      "url": "{LOCAL}/ok?direct=1",
+      "outcome": "unsafe",
+      "attempts": 0
+     },
+     {
+      "url": "http://www.blocked.example/",
+      "outcome": "unsafe",
+      "attempts": 0
+     },
+     {
+      "url": "{base}/redirect?to={LOCAL}/ok",
+      "outcome": "unsafe",
+      "status": null,
+      "attempts": 1
+     }
+    ],
+    "hits": {
+     "/ok": 1,
+     "/redirect": 1
+    }
    }
   }
  ]

@@ -31,6 +31,9 @@ class Engine:
     user_agent: str = "web-access-framework/0.1 (+https://github.com/reckswell/web-access-framework)"
     robots_agent: str = "web-access-framework"
     respect_robots: bool = True
+    https_only: bool = True
+    blocked_domains: list = field(default_factory=list)
+    blocklist_files: list = field(default_factory=list)
     request_timeout: float = 30.0
     max_body_bytes: int = 10 * 1024 * 1024
     max_redirects: int = 10

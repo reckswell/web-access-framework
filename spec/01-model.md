@@ -34,6 +34,8 @@ The final state of a task. Exactly one per task.
 | `blocked` | 403, or a challenge page (see [05-errors.md](05-errors.md)) |
 | `host_blocked` | Not attempted: the host was blocked earlier in this run |
 | `robots_disallowed` | Not attempted: robots.txt disallows the URL |
+| `insecure` | Not attempted, or stopped at a redirect: the URL is not `https` while `engine.https_only` is on |
+| `unsafe` | Not attempted, or stopped at a redirect: the host is on a blocked-domain list |
 | `failed` | Retries exhausted on a retryable error |
 | `invalid` | URL could not be parsed or has a non-http(s) scheme |
 
@@ -53,9 +55,19 @@ What a goal receives for each finished task, success or not.
 | `elapsed_ms` | int | Wall time of the last attempt |
 | `error` | string \| null | Short error text for network failures, else `null` |
 
-Implementations SHOULD give Response helpers: `text()` (decode body using the charset in
-`content-type`, else UTF-8 with replacement), `json()`, and `follow(href, **task_fields)` which resolves
+Implementations SHOULD give Response helpers: `text()`, `json()`, and `follow(href, **task_fields)` which resolves
 `href` against `url` and returns a Task with `depth = task.depth + 1`.
+
+`text()` MUST decode the body so pages in every language read correctly. The encoding is the first of:
+
+1. A byte-order mark (UTF-8, UTF-16LE, UTF-16BE), which is then not part of the text.
+2. The `charset` parameter of `content-type`.
+3. A `<meta charset=...>` or `<meta http-equiv="content-type" content="...charset=...">` in the first 1024 bytes.
+4. UTF-8.
+
+Labels follow the WHATWG Encoding Standard where the language allows (e.g. `shift_jis`, `gbk`, `euc-kr`,
+`windows-1251`). Unknown labels fall back to UTF-8. Invalid bytes become U+FFFD. Vectors:
+[vectors/text_decode.json](vectors/text_decode.json).
 
 ## Record
 
