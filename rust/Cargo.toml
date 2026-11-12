@@ -19,3 +19,6 @@ serde_json = { version = "1.0.154", features = ["preserve_order"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "sync", "signal"] }
 toml = { version = "1.2.1", features = ["preserve_order"] }
 url = "2.5.8"
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["net", "io-util"] } # for examples/bench_server.rs

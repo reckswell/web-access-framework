@@ -39,6 +39,7 @@ struct Inner {
     log: Mutex<Option<BufWriter<File>>>,
     wake: Notify,
     slots: Arc<Semaphore>,
+    workers: usize,
     start: Instant,
 }
 
@@ -65,9 +66,10 @@ fn unix_now() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }
 
-/// Raise the soft open-file limit where the OS has one (spec/09-platforms.md); None on Windows.
-pub fn open_file_limit() -> Option<u64> {
-    if cfg!(windows) { None } else { rlimit::increase_nofile_limit(10240).ok() }
+/// Raise the soft open-file limit to at least `need` where the OS has one (spec/02-config.md Resources);
+/// None on Windows. rlimit caps the request at the hard limit (and macOS's kern.maxfilesperproc).
+pub fn open_file_limit(need: u64) -> Option<u64> {
+    if cfg!(windows) { None } else { rlimit::increase_nofile_limit(need.max(10240)).ok() }
 }
 
 impl Engine {
@@ -76,7 +78,7 @@ impl Engine {
         let e = &cfg.engine;
         let headers = e.headers.iter()
             .filter_map(|(k, v)| Some((k.parse::<reqwest::header::HeaderName>().ok()?, v.parse().ok()?))).collect();
-        let workers = cfg.workers(open_file_limit(), None);
+        let workers = cfg.workers(open_file_limit(cfg.workers(None, None) as u64 + 64), None);
         let safety = Arc::new(Safety::from_config(e)?);
         let (guard, max_redirects) = (safety.clone(), e.max_redirects);
         let redirects = reqwest::redirect::Policy::custom(move |hop| { // every hop passes the safety check
@@ -98,7 +100,7 @@ impl Engine {
         };
         Ok(Self(Arc::new(Inner {
             goal, client, safety, state: Default::default(), sinks: Mutex::new(sinks), log: Mutex::new(log),
-            wake: Notify::new(), slots: Arc::new(Semaphore::new(workers)), start: Instant::now(), cfg,
+            wake: Notify::new(), slots: Arc::new(Semaphore::new(workers)), workers, start: Instant::now(), cfg,
         })))
     }
 
@@ -144,10 +146,10 @@ impl Inner {
     fn add(&self, task: Task) {
         let key = normalize(&task.url);
         let mut s = self.state.lock().unwrap();
-        if let Some(k) = key.as_ref().filter(|_| task.dedup && task.method == "GET") {
-            if !s.seen.insert(k.clone()) {
-                return;
-            }
+        if let Some(k) = key.as_ref().filter(|_| task.dedup && task.method == "GET")
+            && !s.seen.insert(k.clone())
+        {
+            return;
         }
         s.outstanding += 1;
         let refused = if key.is_none() { Some("invalid") } else { self.safety.check(&task.url) };
@@ -366,7 +368,8 @@ impl Inner {
     fn summary(&self) -> Value {
         let s = self.state.lock().unwrap();
         json!({"elapsed": (self.now() * 1e3).round() / 1e3, "finished": s.finished, "requests": s.requests,
-               "outcomes": s.outcomes, "hosts": s.frontier.hosts.len(), "blocked_hosts": s.blocked_hosts})
+               "outcomes": s.outcomes, "hosts": s.frontier.hosts.len(), "blocked_hosts": s.blocked_hosts,
+               "workers": self.workers})
     }
 
     async fn stats(self: Arc<Self>) {

@@ -1,11 +1,12 @@
 """The engine: dispatch, requests, retries, robots.txt, events (spec/03-engine.md)."""
-import asyncio, json, ssl, sys, time
+import asyncio, json, ssl, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import aiohttp, certifi
+from yarl import URL
 
 from .frontier import Frontier
 from .limits import Host, backoff, classify, parse_retry_after
@@ -33,18 +34,34 @@ def error_text(exc):
     return f"network: {type(exc).__name__}"
 
 
-def open_file_limit():
-    """Raise the soft open-file limit where the OS has one (spec/09-platforms.md); None on Windows."""
+def open_file_limit(need=0):
+    """Raise the soft open-file limit where the OS has one (spec/02-config.md Resources); None on Windows."""
     try:
         import resource
     except ImportError:
         return None
     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    want = min(10240, hard if hard != resource.RLIM_INFINITY else 10240)
-    if soft < want:
+    for want in (max(10240, need), 10240):  # macOS refuses values above kern.maxfilesperproc
+        want = want if hard == resource.RLIM_INFINITY else min(want, hard)
         with suppress(ValueError, OSError):
-            resource.setrlimit(resource.RLIMIT_NOFILE, (want, hard))
+            if soft < want:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (want, hard))
+            break
     return resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+
+
+def system_proxies():
+    """HTTP(S)_PROXY / NO_PROXY (or OS settings), read once per run. aiohttp's trust_env re-reads them
+    and ~/.netrc on every request, which cost a quarter of the CPU and could send netrc logins to sites."""
+    raw = urllib.request.getproxies()
+    proxies = {s: (URL(p).with_user(None), aiohttp.BasicAuth.from_url(URL(p)))
+               for s, p in raw.items() if s in ("http", "https") and p.startswith("http://")}
+    def proxy_for(url):
+        u = urlsplit(url)
+        if u.scheme in proxies and not urllib.request.proxy_bypass_environment(u.hostname or "", raw):
+            return proxies[u.scheme]
+        return None, None
+    return proxy_for
 
 
 class Engine:
@@ -79,7 +96,7 @@ class Engine:
     async def run(self):
         """Run until every task is finished; returns the summary dict."""
         e, r = self.cfg.engine, self.cfg.resources.resolve()
-        workers = self.cfg.workers(open_file_limit())
+        self.workers = workers = self.cfg.workers(open_file_limit(self.cfg.workers() + 64))
         loop = asyncio.get_running_loop()
         loop.set_default_executor(ThreadPoolExecutor(r.threads))  # used for DNS lookups
         self.slots, self.running, self.start = asyncio.Semaphore(workers), set(), time.monotonic()
@@ -97,7 +114,8 @@ class Engine:
         stats = asyncio.create_task(self._stats()) if e.stats_interval > 0 else None
         try:
             # 64 KiB header lines: real sites send long Content-Security-Policy headers (aiohttp default: 8 KiB)
-            async with aiohttp.ClientSession(connector=connector, timeout=self.timeout, trust_env=True,
+            self.proxy_for = system_proxies()
+            async with aiohttp.ClientSession(connector=connector, timeout=self.timeout,
                                              middlewares=(guard,), max_line_size=1 << 16,
                                              max_field_size=1 << 16) as self.session:
                 for task in self.goal.start():
@@ -172,8 +190,9 @@ class Engine:
         cap, start, e = self.cfg.engine.max_body_bytes, time.monotonic(), self.cfg.engine
         status, rh, body, url, error = None, {}, b"", task.url, None
         try:
+            proxy, proxy_auth = self.proxy_for(task.url)
             async with self.session.request(task.method, task.url, headers=headers, data=task.body,
-                                            max_redirects=e.max_redirects) as r:
+                                            max_redirects=e.max_redirects, proxy=proxy, proxy_auth=proxy_auth) as r:
                 status, url = r.status, str(r.url)
                 rh = {k.lower(): ", ".join(r.headers.getall(k)) for k in r.headers}
                 buf = bytearray()
@@ -204,9 +223,10 @@ class Engine:
     async def _fetch_robots(self, host, url):
         """(rules, expires at, error); 5xx and network errors disallow everything for a while."""
         u, why = urlsplit(url), None
+        proxy, proxy_auth = self.proxy_for(url)
         try:
             async with self.session.get(f"{u.scheme}://{u.netloc}/robots.txt", headers=self.headers,
-                                        max_redirects=5) as r:
+                                        max_redirects=5, proxy=proxy, proxy_auth=proxy_auth) as r:
                 status, body = r.status, await r.read() if r.status < 300 else b""
         except (Refused, asyncio.TimeoutError, aiohttp.ClientError, OSError) as exc:
             status, why = 599, error_text(exc)
@@ -246,7 +266,7 @@ class Engine:
     def _summary(self):
         return {"elapsed": round(time.monotonic() - self.start, 3), "finished": self.finished,
                 "requests": self.requests, "outcomes": self.outcomes, "hosts": len(self.hosts),
-                "blocked_hosts": self.blocked_hosts}
+                "blocked_hosts": self.blocked_hosts, "workers": self.workers}
 
     async def _stats(self):
         while True:

@@ -90,8 +90,10 @@ workers = max(1, min(max_concurrency, floor(max_memory_mb / per_request_mb), ope
 ```
 
 `open_file_limit` is the process's soft limit on open files (sockets count). On Unix, implementations
-SHOULD first try to raise the soft limit to `min(hard limit, 10240)`. Where no such limit exists
-(Windows), the term is ignored.
+SHOULD first try to raise the soft limit to `min(hard limit, max(10240, W + 64))`, where `W` is `workers`
+without the `open_file_limit` term, so a large `max_concurrency` is not capped at about 10,000. If the OS
+refuses that value (macOS caps it at `kern.maxfilesperproc`), try `min(hard limit, 10240)`. Where no such
+limit exists (Windows), the term is ignored.
 
 `threads` bounds CPU threads: Rust sizes its async runtime with it. The Python base implementation runs
 one event loop in one process, so `threads` only caps its helper thread pool; multi-process Python is a
