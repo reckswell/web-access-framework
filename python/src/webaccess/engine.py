@@ -22,6 +22,17 @@ class Refused(Exception):
     """A redirect hop refused by the safety check; args[0] is `insecure` or `unsafe`."""
 
 
+def error_text(exc):
+    """A request exception -> the `error` text of spec/05-errors.md."""
+    if isinstance(exc, Refused):
+        return exc.args[0]
+    if isinstance(exc, aiohttp.TooManyRedirects):
+        return "redirects"
+    if isinstance(exc, asyncio.TimeoutError):
+        return "timeout"
+    return f"network: {type(exc).__name__}"
+
+
 def open_file_limit():
     """Raise the soft open-file limit where the OS has one (spec/09-platforms.md); None on Windows."""
     try:
@@ -79,12 +90,16 @@ class Engine:
                 raise Refused(refused)
             return await handler(req)
 
-        connector = aiohttp.TCPConnector(limit=workers, ttl_dns_cache=300,
-                                         ssl=ssl.create_default_context(cafile=certifi.where()))
+        tls = ssl.create_default_context(cafile=certifi.where())
+        tls.load_default_certs()  # also trust the OS store (custom CAs, TLS-inspecting proxies), as Rust does
+        connector = aiohttp.TCPConnector(limit=workers, ttl_dns_cache=300, ssl=tls,
+                                         keepalive_timeout=e.idle_timeout)  # finished hosts free their sockets
         stats = asyncio.create_task(self._stats()) if e.stats_interval > 0 else None
         try:
+            # 64 KiB header lines: real sites send long Content-Security-Policy headers (aiohttp default: 8 KiB)
             async with aiohttp.ClientSession(connector=connector, timeout=self.timeout, trust_env=True,
-                                         middlewares=(guard,)) as self.session:
+                                             middlewares=(guard,), max_line_size=1 << 16,
+                                             max_field_size=1 << 16) as self.session:
                 for task in self.goal.start():
                     self.add(task)
                 await self._dispatch()
@@ -121,8 +136,9 @@ class Engine:
         try:
             if host.blocked:
                 return self._finish(Response(task, task.url, None, "host_blocked", attempts=attempts))
-            if not await self._allowed(host, task.url):
-                return self._finish(Response(task, task.url, None, "robots_disallowed", attempts=attempts))
+            allowed, why = await self._allowed(host, task.url)
+            if not allowed:  # `why` says when robots.txt could not be fetched
+                return self._finish(Response(task, task.url, None, "robots_disallowed", attempts=attempts, error=why))
             attempts += 1
             self.requests += 1
             res = await self._request(task, attempts)
@@ -166,48 +182,46 @@ class Engine:
                     if len(buf) >= cap:
                         break
                 body = bytes(buf[:cap])
-        except Refused as exc:
-            error = exc.args[0]
-        except aiohttp.TooManyRedirects:
-            error = "redirects"
-        except asyncio.TimeoutError:
-            error = "timeout"
-        except (aiohttp.ClientError, OSError) as exc:
-            error = f"network: {type(exc).__name__}"
+        except (Refused, asyncio.TimeoutError, aiohttp.ClientError, OSError) as exc:
+            error = error_text(exc)
         if error:
             status, rh, body = None, {}, b""
         return Response(task, url, status, "", rh, body, attempts, int((time.monotonic() - start) * 1000), error)
 
     # ---- robots.txt ---------------------------------------------------------------------------
     async def _allowed(self, host, url):
+        """(allowed, error): error is set when robots.txt could not be fetched."""
         e = self.cfg.engine
         if not e.respect_robots:
-            return True
+            return True, None
         t = host.robots
         if t is None or (t.done() and t.result()[1] < time.monotonic()):
             host.robots = t = asyncio.ensure_future(self._fetch_robots(host, url))
-        robots = (await asyncio.shield(t))[0]
+        robots, _, why = await asyncio.shield(t)
         u = urlsplit(url)
-        return robots.allowed(e.robots_agent, (u.path or "/") + (f"?{u.query}" if u.query else ""))
+        return robots.allowed(e.robots_agent, (u.path or "/") + (f"?{u.query}" if u.query else "")), why
 
     async def _fetch_robots(self, host, url):
-        u = urlsplit(url)
+        """(rules, expires at, error); 5xx and network errors disallow everything for a while."""
+        u, why = urlsplit(url), None
         try:
             async with self.session.get(f"{u.scheme}://{u.netloc}/robots.txt", headers=self.headers,
                                         max_redirects=5) as r:
-                text = await r.text(errors="replace") if r.status < 300 else ""
-                status = r.status
-        except (asyncio.TimeoutError, aiohttp.ClientError, OSError, Refused):
-            status = 599
+                status, body = r.status, await r.read() if r.status < 300 else b""
+        except (Refused, asyncio.TimeoutError, aiohttp.ClientError, OSError) as exc:
+            status, why = 599, error_text(exc)
         if status >= 500:
-            return Robots(DENY_ALL), time.monotonic() + self.cfg.engine.robots_error_ttl
-        robots = Robots(text)
+            ttl = self.cfg.engine.robots_error_ttl
+            return Robots(DENY_ALL), time.monotonic() + ttl, f"robots: {why or status}"
+        robots = Robots(body.decode("utf-8", "replace"))  # RFC 9309: robots.txt is UTF-8
         if (delay := robots.crawl_delay(self.cfg.engine.robots_agent)) and delay > 0:
             host.cap_rate(1 / delay)
-        return robots, INF
+        return robots, INF, None
 
     # ---- results ------------------------------------------------------------------------------
     def _finish(self, res):
+        if res.url != res.task.url and res.task.dedup and res.task.method == "GET" and (key := normalize(res.url)):
+            self.seen.add(key)  # a redirect target counts as seen, so links back to it are not fetched again
         self._emit("request", url=res.task.url, host=host_key(res.task.url), status=res.status,
                    outcome=res.outcome, attempts=res.attempts, elapsed_ms=res.elapsed_ms, error=res.error)
         try:

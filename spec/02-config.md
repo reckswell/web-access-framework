@@ -18,6 +18,7 @@ https_only = true              # refuse http:// URLs and redirects to http:// (o
 blocked_domains = []           # never contact these hosts or their subdomains (outcome `unsafe`)
 blocklist_files = []           # more blocked domains: one per line, or hosts-file lines ("0.0.0.0 bad.example")
 request_timeout = 30.0         # seconds per attempt, connect + full body
+idle_timeout = 2.0             # seconds an idle connection is kept for reuse (each one holds memory)
 max_body_bytes = 10485760      # bodies are truncated beyond this
 max_redirects = 10
 log_path = ""                  # JSONL event log; "" = no log file

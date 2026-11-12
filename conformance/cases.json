@@ -266,7 +266,8 @@
       "title": "title",
       "price": ".price",
       "image": "img@src",
-      "missing": ".nope"
+      "missing": ".nope",
+      "nojs": "noscript"
      }
     }
    },
@@ -279,9 +280,37 @@
       "title": "Page 0",
       "price": "0",
       "image": "{base}/img/0.png",
-      "missing": null
+      "missing": null,
+      "nojs": "JS off"
      }
+    ],
+    "key_order": [
+     "url",
+     "title",
+     "price",
+     "image",
+     "missing",
+     "nojs"
     ]
+   }
+  },
+  {
+   "name": "redirect targets count as seen",
+   "config": {
+    "goal": {
+     "type": "crawl",
+     "seeds": [
+      "{base}/redirect?to=/site/0"
+     ],
+     "max_depth": 2
+    }
+   },
+   "urls": [],
+   "expect": {
+    "record_count": 7,
+    "hits": {
+     "/site/0": 1
+    }
    }
   },
   {
@@ -357,6 +386,43 @@
      "/ok": 1,
      "/redirect": 1
     }
+   }
+  },
+  {
+   "name": "unreachable robots.txt is reported",
+   "config": {},
+   "urls": [
+    "{LOCAL}/ok"
+   ],
+   "expect": {
+    "records": [
+     {
+      "url": "{LOCAL}/ok",
+      "outcome": "robots_disallowed",
+      "attempts": 0,
+      "error": "robots: 503"
+     }
+    ],
+    "hits": {
+     "/ok": 0,
+     "/robots.txt": 1
+    }
+   }
+  },
+  {
+   "name": "long response headers",
+   "config": {},
+   "urls": [
+    "{base}/bigheader"
+   ],
+   "expect": {
+    "records": [
+     {
+      "url": "{base}/bigheader",
+      "outcome": "ok",
+      "status": 200
+     }
+    ]
    }
   }
  ]

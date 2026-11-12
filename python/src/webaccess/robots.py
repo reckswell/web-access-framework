@@ -14,7 +14,7 @@ def _compile(pattern):
 class Robots:
     def __init__(self, text=""):
         self.groups, group, in_agents = [], None, False  # group = (agents, rules, [crawl_delay])
-        for line in text.splitlines():
+        for line in text.removeprefix("\ufeff").splitlines():  # a leading BOM is not part of the first key
             key, sep, val = line.split("#", 1)[0].partition(":")
             key, val = key.strip().lower(), val.strip()
             if not sep:

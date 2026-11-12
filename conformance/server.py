@@ -1,6 +1,7 @@
 """Local mock website for the conformance suite. Standard library only, runs on any OS.
 
-Every request is recorded so cases can assert on hit counts and timing.
+Every request is recorded so cases can assert on hit counts and timing. Requested as `localhost`, robots.txt
+answers 503, so cases can test an unreachable robots.txt.
 """
 import json, threading, time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -24,7 +25,8 @@ class State:
 def site_page(n, limit=6):
     links = "".join(f'<a href="/site/{c}">child {c}</a>' for c in (2 * n + 1, 2 * n + 2) if c <= limit)
     return (f"<html><head><title>Page {n}</title></head><body><span class='price'> {n} </span>"
-            f"<img src='/img/{n}.png'>{links}<a href='mailto:x@example.com'>mail</a></body></html>")
+            f"<noscript><b>JS off</b></noscript><img src='/img/{n}.png'>{links}<a href='/site/0#top'>top</a>"
+            f"<a href='mailto:x@example.com'>mail</a></body></html>")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -52,7 +54,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, json.dumps(ts), "application/json")
         n = self.state.hit(self.path)
         if p == "/robots.txt":
-            return self.send(200, ROBOTS)
+            down = self.headers.get("Host", "").startswith("localhost")
+            return self.send(503, "down") if down else self.send(200, ROBOTS)
         if p == "/ok":
             return self.send(200, "ok")
         if p.startswith("/status/"):
@@ -70,6 +73,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(302, "", headers=[("Location", q.get("to", "/ok"))])
         if p.startswith("/site/"):
             return self.send(200, site_page(int(p.split("/")[2])), "text/html; charset=utf-8")
+        if p == "/bigheader":  # some real sites send 10-20 KB Content-Security-Policy headers
+            return self.send(200, "ok", headers=[("Content-Security-Policy", "default-src 'self' " + "x" * 20000)])
         if p.startswith("/img/"):
             return self.send(200, "img", "image/png")
         return self.send(404, "not found")

@@ -53,7 +53,7 @@ What a goal receives for each finished task, success or not.
 | `body` | bytes | Response body (empty when none); capped at `engine.max_body_bytes` |
 | `attempts` | int | Requests made for this task (0 if never attempted) |
 | `elapsed_ms` | int | Wall time of the last attempt |
-| `error` | string \| null | Short error text for network failures, else `null` |
+| `error` | string \| null | Short error text for network failures ([05-errors.md](05-errors.md)); for `robots_disallowed` because robots.txt could not be fetched, `robots: <status or error>` ([04-politeness.md](04-politeness.md)); else `null` |
 
 Implementations SHOULD give Response helpers: `text()`, `json()`, and `follow(href, **task_fields)` which resolves
 `href` against `url` and returns a Task with `depth = task.depth + 1`.
@@ -65,9 +65,11 @@ Implementations SHOULD give Response helpers: `text()`, `json()`, and `follow(hr
 3. A `<meta charset=...>` or `<meta http-equiv="content-type" content="...charset=...">` in the first 1024 bytes.
 4. UTF-8.
 
-Labels follow the WHATWG Encoding Standard where the language allows (e.g. `shift_jis`, `gbk`, `euc-kr`,
-`windows-1251`). Unknown labels fall back to UTF-8. Invalid bytes become U+FFFD. Vectors:
-[vectors/text_decode.json](vectors/text_decode.json).
+Labels and decoders follow the [WHATWG Encoding Standard](https://encoding.spec.whatwg.org/#names-and-labels),
+as browsers do. Several labels mean more than the strict standard of the same name, and real pages rely on
+that: `shift_jis` decodes as Windows-31J, `euc-kr` as windows-949, `gb2312` / `gbk` as GB18030, and
+`iso-8859-1` / `us-ascii` as windows-1252. Labels outside that standard (e.g. `utf-7`) fall back to UTF-8.
+Invalid bytes become U+FFFD. Vectors: [vectors/text_decode.json](vectors/text_decode.json).
 
 ## Record
 

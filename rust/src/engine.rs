@@ -52,6 +52,15 @@ impl std::fmt::Display for Refused {
 }
 impl std::error::Error for Refused {}
 
+/// A request error -> the `error` text of spec/05-errors.md.
+fn error_text(e: &reqwest::Error) -> String {
+    let refused = std::iter::successors(std::error::Error::source(e), |s| s.source())
+        .find_map(|s| s.downcast_ref::<Refused>()).map(|r| r.0);
+    if e.is_timeout() { "timeout".into() } else if let Some(why) = refused { why.into() }
+    else if e.is_redirect() { "redirects".into() }
+    else { format!("network: {}", if e.is_connect() { "connect" } else { "request" }) }
+}
+
 fn unix_now() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }
@@ -79,6 +88,7 @@ impl Engine {
             .timeout(Duration::from_secs_f64(e.request_timeout))
             .redirect(redirects)
             .pool_max_idle_per_host(workers.min(64))
+            .pool_idle_timeout(Duration::from_secs_f64(e.idle_timeout)) // idle connections hold ~64 KB each
             .build().map_err(|err| err.to_string())?;
         let log = if e.log_path.is_empty() { None } else {
             if let Some(dir) = std::path::Path::new(&e.log_path).parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -192,8 +202,8 @@ impl Inner {
         };
         if blocked {
             self.finish(Response::bare(task, "host_blocked", attempts));
-        } else if !self.allowed(h, &task.url).await {
-            self.finish(Response::bare(task, "robots_disallowed", attempts));
+        } else if let (false, why) = self.allowed(h, &task.url).await { // `why`: robots.txt could not be fetched
+            self.finish(Response { error: why, ..Response::bare(task, "robots_disallowed", attempts) });
         } else {
             attempts += 1;
             let mut res = self.request(task, attempts).await;
@@ -268,54 +278,59 @@ impl Inner {
         match result {
             Ok((status, url, headers, body)) =>
                 Response { task, url, status: Some(status), outcome: "", headers, body, attempts, elapsed_ms, error: None },
-            Err(e) => {
-                let refused = std::iter::successors(std::error::Error::source(&e), |s| s.source())
-                    .find_map(|s| s.downcast_ref::<Refused>()).map(|r| r.0);
-                let error = if e.is_timeout() { "timeout".into() } else if let Some(why) = refused { why.into() }
-                            else if e.is_redirect() { "redirects".into() }
-                            else { format!("network: {}", if e.is_connect() { "connect" } else { "request" }) };
-                Response { error: Some(error), elapsed_ms, ..Response::bare(task, "", attempts) }
-            }
+            Err(e) => Response { error: Some(error_text(&e)), elapsed_ms, ..Response::bare(task, "", attempts) },
         }
     }
 
-    async fn allowed(&self, h: usize, url: &str) -> bool {
+    /// (allowed, error): error is set when robots.txt could not be fetched.
+    async fn allowed(&self, h: usize, url: &str) -> (bool, Option<String>) {
         let e = &self.cfg.engine;
         if !e.respect_robots {
-            return true;
+            return (true, None);
         }
         let slot = self.state.lock().unwrap().frontier.hosts[h].robots.clone();
-        let robots = {
+        let (robots, why) = {
             let mut slot = slot.lock().await; // one fetch per host; concurrent first tasks wait here
-            if slot.as_ref().is_none_or(|(_, expires)| *expires < self.now()) {
+            if slot.as_ref().is_none_or(|(_, expires, _)| *expires < self.now()) {
                 *slot = Some(self.fetch_robots(h, url).await);
             }
-            slot.as_ref().unwrap().0.clone()
+            let (robots, _, why) = slot.as_ref().unwrap();
+            (robots.clone(), why.clone())
         };
-        let Ok(u) = url::Url::parse(url) else { return true };
+        let Ok(u) = url::Url::parse(url) else { return (true, None) };
         let target = format!("{}{}", u.path(), u.query().map_or(String::new(), |q| format!("?{q}")));
-        robots.allowed(&e.robots_agent, &target)
+        (robots.allowed(&e.robots_agent, &target), why)
     }
 
-    async fn fetch_robots(&self, h: usize, url: &str) -> (Arc<Robots>, f64) {
+    /// (rules, expires at, error); 5xx and network errors disallow everything for a while.
+    async fn fetch_robots(&self, h: usize, url: &str) -> (Arc<Robots>, f64, Option<String>) {
         let Ok(robots_url) = url::Url::parse(url).and_then(|u| u.join("/robots.txt")) else {
-            return (Arc::new(Robots::default()), f64::INFINITY);
+            return (Arc::new(Robots::default()), f64::INFINITY, None);
         };
-        let (status, text) = match self.client.get(robots_url).send().await {
-            Ok(r) => { let s = r.status().as_u16(); (s, if s < 300 { r.text().await.unwrap_or_default() } else { String::new() }) }
-            Err(_) => (599, String::new()),
+        let (status, body, why) = match self.client.get(robots_url).send().await {
+            Ok(r) => {
+                let s = r.status().as_u16();
+                (s, if s < 300 { r.bytes().await.unwrap_or_default().to_vec() } else { vec![] }, s.to_string())
+            }
+            Err(e) => (599, vec![], error_text(&e)),
         };
         if status >= 500 {
-            return (Arc::new(Robots::parse(DENY_ALL)), self.now() + self.cfg.engine.robots_error_ttl);
+            let expires = self.now() + self.cfg.engine.robots_error_ttl;
+            return (Arc::new(Robots::parse(DENY_ALL)), expires, Some(format!("robots: {why}")));
         }
-        let robots = Robots::parse(&text);
+        let robots = Robots::parse(&String::from_utf8_lossy(&body)); // RFC 9309: robots.txt is UTF-8
         if let Some(delay) = robots.crawl_delay(&self.cfg.engine.robots_agent).filter(|d| *d > 0.0) {
             self.state.lock().unwrap().frontier.hosts[h].cap_rate(1.0 / delay);
         }
-        (Arc::new(robots), f64::INFINITY)
+        (Arc::new(robots), f64::INFINITY, None)
     }
 
     fn finish(&self, res: Response) {
+        // a redirect target counts as seen, so links back to it are not fetched again
+        if res.url != res.task.url && res.task.dedup && res.task.method == "GET"
+            && let Some(key) = normalize(&res.url) {
+            self.state.lock().unwrap().seen.insert(key);
+        }
         self.emit("request", json!({"url": res.task.url, "host": host_key(&res.task.url), "status": res.status,
                                     "outcome": res.outcome, "attempts": res.attempts, "elapsed_ms": res.elapsed_ms,
                                     "error": res.error}));

@@ -57,7 +57,7 @@ pub fn backoff(attempts: u32, retry: &Retry, retry_after: Option<f64>, max_retry
 }
 
 pub type Event = (&'static str, Value);
-type RobotsSlot = Arc<tokio::sync::Mutex<Option<(Arc<Robots>, f64)>>>; // (rules, expires at)
+type RobotsSlot = Arc<tokio::sync::Mutex<Option<(Arc<Robots>, f64, Option<String>)>>>; // (rules, expires at, error)
 
 /// Per-host politeness state plus the frontier's scheduling fields.
 pub struct Host {

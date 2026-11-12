@@ -64,8 +64,15 @@ share one fetch. The fetch does not count against the host's pacing.
 | 4xx (incl. 404) | Allow everything |
 | 5xx, timeout or network error | Disallow everything for `robots_error_ttl` seconds, then fetch again |
 
+Tasks refused because robots.txt could not be fetched finish with `robots_disallowed` and
+`error = "robots: <reason>"`, where the reason is the status (`robots: 503`) or the error text of
+[05-errors.md](05-errors.md) (`robots: timeout`, `robots: network: ...`). This keeps unreachable hosts
+apart from real `Disallow` rules in the output.
+
 ### Parsing (RFC 9309, plus `Crawl-delay`)
 
+- Decode the body as UTF-8 (invalid bytes become U+FFFD) and drop a leading byte-order mark, which
+  some sites send (e.g. Wikipedia). A BOM left in place would hide the first `User-agent` line.
 - Split into lines; strip `#` comments and surrounding whitespace; skip blank lines.
 - Each line is `key: value`; keys are case-insensitive. Lines without `:` are ignored.
 - A `user-agent` line that follows a rule line (or is the first line) starts a new group; consecutive

@@ -20,7 +20,8 @@ keyed by it. `join(base, href)` resolves a relative reference per RFC 3986 §5.
 
 The engine keeps a set of normalized URLs seen this run. A task with `dedup = true` and method `GET`
 whose normalized URL is already in the set is dropped silently (no Response, no Record). Retries of a
-task never count as duplicates.
+task never count as duplicates. When such a task was redirected, its final URL is added to the set too
+(before the goal sees the Response), so a link back to the page it landed on is not fetched again.
 
 ## Safety checks
 
@@ -58,7 +59,8 @@ Resources). Each worker repeats:
 1. `task = frontier.next()`; stop when the run is finished (below).
 2. If robots.txt is respected and disallows the URL → finish with `robots_disallowed`.
 3. If the host is blocked for the run → finish with `host_blocked`.
-4. Send the request (`request_timeout`, `max_redirects`, `max_body_bytes`, merged headers).
+4. Send the request (`request_timeout`, `max_redirects`, `max_body_bytes`, merged headers). Response
+   header lines of at least 64 KiB MUST be accepted: real sites send long `Content-Security-Policy` headers.
 5. Classify the result ([05-errors.md](05-errors.md)) and feed the signal to the host limiter
    ([04-politeness.md](04-politeness.md)).
 6. If retryable and `attempts < max_attempts`: schedule the same task to re-enter the frontier after the

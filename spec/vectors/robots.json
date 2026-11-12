@@ -224,6 +224,22 @@
      true
     ]
    ]
+  },
+  {
+   "name": "leading byte-order mark is ignored",
+   "robots": "﻿User-agent: *\nDisallow: /private\n",
+   "agent": "web-access-framework",
+   "crawl_delay": null,
+   "checks": [
+    [
+     "/private",
+     false
+    ],
+    [
+     "/",
+     true
+    ]
+   ]
   }
  ]
 }

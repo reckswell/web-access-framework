@@ -39,16 +39,21 @@ follow = "a[href]"         # CSS selector for links to follow ("" = none)
 include = ""               # optional regex a followed URL must match
 exclude = ""               # optional regex a followed URL must not match
 
-[goal.fields]              # name = "css selector" -> text of the first match, trimmed
+[goal.fields]              # name = "css selector" -> text of the first match, trimmed (see below)
 title = "title"            # name = "css selector@attr" -> that attribute of the first match
 image = "img@src"          # attribute values named href/src are resolved to absolute URLs
 ```
 
 For each `ok` response whose `content-type` contains `html`:
 
-1. Emit a record: `{"url": <final url>, <field>: <value or null>, ...}` in field order.
+1. Emit a record: `{"url": <final url>, <field>: <value or null>, ...}` with fields in the order the
+   config lists them.
 2. If `depth < max_depth`, resolve each `follow` match's `href` against the final URL, keep it if it is
    http(s), passes `same_host` / `include` / `exclude`, and the page budget allows; add as a Task with
    `depth + 1`.
 
 Non-HTML `ok` responses emit `{"url": ...}` only. Failures emit nothing.
+
+Pages are parsed as a browser with scripting turned off parses them, so `<noscript>` content is markup
+(its links are followed, its tags never appear in text). A match's text is its DOM `textContent`: all
+descendant text, `<script>` text included, `<template>` content excluded.

@@ -56,6 +56,9 @@ def check(case, records, base, tmp):
             ok = (got.get(k) is not None) if v is True else got.get(k) == v
             if not ok:
                 errs.append(f"{want['url']}: {k} expected {v!r}, got {got.get(k)!r}")
+    for r in records if "key_order" in exp else ():
+        if list(r) != exp["key_order"]:
+            errs.append(f"{r.get('url')}: keys {list(r)}, expected {exp['key_order']}")
     counts = {}
     for r in records:
         counts[r.get("outcome")] = counts.get(r.get("outcome"), 0) + 1
