@@ -27,6 +27,7 @@ Every run uses level `max`. Options:
 | `--threads` | `0` | Rust runtime threads; `0` = all cores |
 | `--hosts` | `20000` | Number of hosts (local mode) |
 | `--delay-ms`, `--page-kb` | `100`, `100` | Server delay per request and page size (local mode) |
+| `--server-close` | `reset` | Local mode: `reset` ends each connection without leaving TIME_WAIT entries; `fin` closes normally (see `rust/examples/bench_server.rs`) |
 | `--input FILE` | | Live mode: fetch these URLs from the internet instead |
 
 Each run prints a row and appends it, with the machine's OS, cores and RAM, to `out/bench/results.jsonl`.

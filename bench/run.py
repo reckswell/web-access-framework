@@ -53,9 +53,9 @@ def host_urls(n, port):
     return [f"http://127.{1 + i // 64516}.{1 + i // 254 % 254}.{1 + i % 254}:{port}/" for i in range(n)]
 
 
-def start_server(port, delay_ms, page_kb):
+def start_server(port, delay_ms, page_kb, close):
     server = subprocess.Popen([str(ROOT / f"rust/target/release/examples/bench_server{EXE}"),
-                               str(port), str(delay_ms), str(page_kb)])
+                               str(port), str(delay_ms), str(page_kb), close])
     for _ in range(100):
         try:
             socket.create_connection(("127.0.0.1", port), timeout=1).close()
@@ -82,12 +82,12 @@ def run_once(a, workers, out, input_file, env):
     lines = ["[resources]"] + [f"{k} = {json.dumps(v)}" for k, v in resources.items() if v]
     lines += ["[engine]", "stats_interval = 0", f"https_only = {str(bool(a.input)).lower()}",
               "[goal]", 'type = "fetch"']
-    tag = f"{a.port}-w{workers}-t{a.threads}" + ("-live" if a.input else f"-d{a.delay_ms}")  # one set of files per run
+    tag = f"{a.port}-w{workers}-t{a.threads}" + ("-live" if a.input else f"-d{a.delay_ms}-{a.server_close}")  # one set of files per run
     cfg, records, log = out / f"{tag}.toml", out / f"{tag}-records.jsonl", out / f"{tag}-stderr.txt"
     cfg.write_text("\n".join(lines) + "\n")
     env = dict(env)
     cmd = [str(ROOT / f"rust/target/release/webaccess{EXE}")] if a.port == "rust" else python_cmd(env)
-    server = None if a.input else start_server(a.server_port, a.delay_ms, a.page_kb)
+    server = None if a.input else start_server(a.server_port, a.delay_ms, a.page_kb, a.server_close)
     with open(log, "w") as err:
         start = time.monotonic()
         p = subprocess.Popen(cmd + ["run", str(cfg), "--input", str(input_file), "--output", str(records)],
@@ -111,7 +111,8 @@ def run_once(a, workers, out, input_file, env):
             "engine_cpu_s": round(cpu, 2), "engine_kernel_s": round(kernel, 2),
             "cpu_used_pct": round(100 * cpu / wall / cores, 1), "cpu_ms_per_site": round(1000 * cpu / summary["finished"], 3),
             "peak_mb": round(peak, 1), "server_cpu_s": round(server_cpu, 2),
-            "delay_ms": None if a.input else a.delay_ms, "page_kb": None if a.input else a.page_kb}
+            "delay_ms": None if a.input else a.delay_ms, "page_kb": None if a.input else a.page_kb,
+            "server_close": None if a.input else a.server_close}
 
 
 def main():
@@ -125,6 +126,8 @@ def main():
     ap.add_argument("--threads", type=int, default=0, help="0 = all cores")
     ap.add_argument("--input", help="live mode: file with one URL per line")
     ap.add_argument("--server-port", type=int, default=8800)
+    ap.add_argument("--server-close", choices=["reset", "fin"], default="reset",
+                    help="local mode: how the server ends connections (see rust/examples/bench_server.rs)")
     ap.add_argument("--out", default=str(ROOT / "out/bench"))
     a = ap.parse_args()
 
