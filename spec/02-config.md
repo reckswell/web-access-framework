@@ -23,7 +23,7 @@ max_body_bytes = 10485760      # bodies are truncated beyond this
 max_redirects = 10
 log_path = ""                  # JSONL event log; "" = no log file
 stats_interval = 5.0           # seconds between progress lines on stderr; 0 = off
-robots_error_ttl = 300.0       # seconds to treat a host as fully disallowed after robots.txt fails
+robots_error_ttl = 300.0       # seconds to treat a host as fully disallowed after robots.txt fails max_attempts times
 
 [engine.headers]               # sent with every request (task headers override)
 accept = "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8"

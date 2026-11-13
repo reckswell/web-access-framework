@@ -57,7 +57,9 @@ The engine runs `workers` workers (the effective in-flight limit from [02-config
 Resources). Each worker repeats:
 
 1. `task = frontier.next()`; stop when the run is finished (below).
-2. If robots.txt is respected and disallows the URL → finish with `robots_disallowed`.
+2. If robots.txt is respected and disallows the URL → finish with `robots_disallowed`. While a failed
+   robots.txt fetch is being retried, schedule the task to re-enter the frontier when the next fetch is due
+   ([04-politeness.md](04-politeness.md)).
 3. If the host is blocked for the run → finish with `host_blocked`.
 4. Send the request (`request_timeout`, `max_redirects`, `max_body_bytes`, merged headers). Response
    header lines of at least 64 KiB MUST be accepted: real sites send long `Content-Security-Policy` headers.

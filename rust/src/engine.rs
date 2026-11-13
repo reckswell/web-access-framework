@@ -2,7 +2,7 @@
 use crate::config::Config;
 use crate::frontier::{Frontier, Pop};
 use crate::goals::Goal;
-use crate::limits::{backoff, classify, parse_retry_after, Host};
+use crate::limits::{backoff, classify, parse_retry_after, Host, RobotsEntry};
 use crate::model::{Output, Response, Task};
 use crate::robots::{Robots, DENY_ALL};
 use crate::safety::Safety;
@@ -55,11 +55,19 @@ impl std::error::Error for Refused {}
 
 /// A request error -> the `error` text of spec/05-errors.md.
 fn error_text(e: &reqwest::Error) -> String {
-    let refused = std::iter::successors(std::error::Error::source(e), |s| s.source())
-        .find_map(|s| s.downcast_ref::<Refused>()).map(|r| r.0);
+    let causes = || std::iter::successors(std::error::Error::source(e), |s| s.source());
+    let refused = causes().find_map(|s| s.downcast_ref::<Refused>()).map(|r| r.0);
     if e.is_timeout() { "timeout".into() } else if let Some(why) = refused { why.into() }
     else if e.is_redirect() { "redirects".into() }
+    else if causes().any(|s| s.to_string() == "dns error") { "network: dns".into() } // hyper-util's resolver error
     else { format!("network: {}", if e.is_connect() { "connect" } else { "request" }) }
+}
+
+/// What robots.txt says about a URL.
+enum Access {
+    Allowed,
+    Disallowed(Option<String>), // the error when robots.txt could not be fetched
+    Retry { delay: f64, fails: u32, why: String }, // robots.txt failed and is fetched again after `delay`
 }
 
 fn unix_now() -> f64 {
@@ -197,56 +205,72 @@ impl Inner {
         }
     }
 
-    async fn handle(self: Arc<Self>, h: usize, task: Task, mut attempts: u32) {
+    async fn handle(self: Arc<Self>, h: usize, task: Task, attempts: u32) {
         let (blocked, key) = {
             let s = self.state.lock().unwrap();
             (s.frontier.hosts[h].blocked, s.frontier.hosts[h].key.clone())
         };
         if blocked {
             self.finish(Response::bare(task, "host_blocked", attempts));
-        } else if let (false, why) = self.allowed(h, &task.url).await { // `why`: robots.txt could not be fetched
-            self.finish(Response { error: why, ..Response::bare(task, "robots_disallowed", attempts) });
         } else {
-            attempts += 1;
-            let mut res = self.request(task, attempts).await;
-            let kind = res.error.as_deref().map(|e| e.split(':').next().unwrap_or(e));
-            let (outcome, signal, retry) = classify(res.status, kind, &res.body);
-            let ra = res.headers.get("retry-after").and_then(|v| parse_retry_after(v, unix_now()));
-            let (events, max_ra) = {
-                let mut s = self.state.lock().unwrap();
-                s.requests += 1;
-                let now = self.now();
-                let host = &mut s.frontier.hosts[h];
-                let (events, max_ra) = (host.apply(signal, now, ra), host.cfg.max_retry_after);
-                if events.iter().any(|(name, _)| *name == "host_blocked") {
-                    s.blocked_hosts.push(key.clone());
+            match self.allowed(h, &task.url).await {
+                Access::Allowed => self.attempt(h, key, task, attempts + 1).await,
+                Access::Disallowed(why) =>
+                    self.finish(Response { error: why, ..Response::bare(task, "robots_disallowed", attempts) }),
+                Access::Retry { delay, fails, why } => { // the task waits for the next robots.txt fetch
+                    self.emit("retry", json!({"url": task.url, "host": key, "attempt": fails,
+                                              "delay": (delay * 1e3).round() / 1e3, "reason": why}));
+                    self.requeue(h, task, attempts, delay);
                 }
-                (events, max_ra)
-            };
-            for (name, mut fields) in events {
-                fields["host"] = key.clone().into();
-                self.emit(name, fields);
-            }
-            let t = &res.task;
-            let safe = matches!(t.method.as_str(), "GET" | "HEAD") || t.meta.get("retry_safe") == Some(&Value::Bool(true));
-            if retry && safe && attempts < self.cfg.retry.max_attempts {
-                let delay = backoff(attempts, &self.cfg.retry, ra, max_ra);
-                let reason = res.status.map_or_else(|| kind.unwrap_or("").to_string(), |s| s.to_string());
-                self.emit("retry", json!({"url": t.url, "host": key, "attempt": attempts,
-                                          "delay": (delay * 1e3).round() / 1e3, "reason": reason}));
-                let me = self.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs_f64(delay)).await;
-                    me.state.lock().unwrap().frontier.push(h, res.task, attempts);
-                    me.wake.notify_one();
-                });
-            } else {
-                res.outcome = outcome;
-                self.finish(res);
             }
         }
         self.state.lock().unwrap().frontier.release(h);
         self.wake.notify_one();
+    }
+
+    /// Re-add a task to the frontier after `delay` seconds; it stays outstanding meanwhile.
+    fn requeue(self: &Arc<Self>, h: usize, task: Task, attempts: u32, delay: f64) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs_f64(delay)).await;
+            me.state.lock().unwrap().frontier.push(h, task, attempts);
+            me.wake.notify_one();
+        });
+    }
+
+    /// Send the request, feed the host limiter, then retry or finish (spec/03-engine.md steps 4-6).
+    async fn attempt(self: &Arc<Self>, h: usize, key: String, task: Task, attempts: u32) {
+        let mut res = self.request(task, attempts).await;
+        let kind = res.error.as_deref().map(|e| e.split(':').next().unwrap_or(e));
+        let (outcome, signal, retry) = classify(res.status, kind, &res.body);
+        let ra = res.headers.get("retry-after").and_then(|v| parse_retry_after(v, unix_now()));
+        let (events, max_ra) = {
+            let mut s = self.state.lock().unwrap();
+            s.requests += 1;
+            let now = self.now();
+            let host = &mut s.frontier.hosts[h];
+            let (events, max_ra) = (host.apply(signal, now, ra), host.cfg.max_retry_after);
+            if events.iter().any(|(name, _)| *name == "host_blocked") {
+                s.blocked_hosts.push(key.clone());
+            }
+            (events, max_ra)
+        };
+        for (name, mut fields) in events {
+            fields["host"] = key.clone().into();
+            self.emit(name, fields);
+        }
+        let t = &res.task;
+        let safe = matches!(t.method.as_str(), "GET" | "HEAD") || t.meta.get("retry_safe") == Some(&Value::Bool(true));
+        if retry && safe && attempts < self.cfg.retry.max_attempts {
+            let delay = backoff(attempts, &self.cfg.retry, ra, max_ra);
+            let reason = res.status.map_or_else(|| kind.unwrap_or("").to_string(), |s| s.to_string());
+            self.emit("retry", json!({"url": t.url, "host": key, "attempt": attempts,
+                                      "delay": (delay * 1e3).round() / 1e3, "reason": reason}));
+            self.requeue(h, res.task, attempts, delay);
+        } else {
+            res.outcome = outcome;
+            self.finish(res);
+        }
     }
 
     async fn request(&self, task: Task, attempts: u32) -> Response {
@@ -284,30 +308,39 @@ impl Inner {
         }
     }
 
-    /// (allowed, error): error is set when robots.txt could not be fetched.
-    async fn allowed(&self, h: usize, url: &str) -> (bool, Option<String>) {
-        let e = &self.cfg.engine;
+    /// Whether robots.txt allows `url`. A failed fetch is retried with backoff, up to `retry.max_attempts`
+    /// fetches; tasks wait for each one. After that the host is disallowed for `robots_error_ttl`.
+    async fn allowed(&self, h: usize, url: &str) -> Access {
+        let (e, max) = (&self.cfg.engine, self.cfg.retry.max_attempts);
         if !e.respect_robots {
-            return (true, None);
+            return Access::Allowed;
         }
         let slot = self.state.lock().unwrap().frontier.hosts[h].robots.clone();
-        let (robots, why) = {
+        let entry = {
             let mut slot = slot.lock().await; // one fetch per host; concurrent first tasks wait here
-            if slot.as_ref().is_none_or(|(_, expires, _)| *expires < self.now()) {
-                *slot = Some(self.fetch_robots(h, url).await);
+            if slot.as_ref().is_none_or(|r| r.expires < self.now()) {
+                let fails = slot.as_ref().map_or(0, |r| if r.fails < max { r.fails } else { 0 }); // 0: start over
+                *slot = Some(self.fetch_robots(h, url, fails).await);
             }
-            let (robots, _, why) = slot.as_ref().unwrap();
-            (robots.clone(), why.clone())
+            slot.clone().unwrap()
         };
-        let Ok(u) = url::Url::parse(url) else { return (true, None) };
-        let target = format!("{}{}", u.path(), u.query().map_or(String::new(), |q| format!("?{q}")));
-        (robots.allowed(&e.robots_agent, &target), why)
+        match entry.error {
+            Some(why) if entry.fails < max => Access::Retry { delay: (entry.expires - self.now()).max(0.0), fails: entry.fails, why },
+            Some(why) => Access::Disallowed(Some(why)),
+            None => {
+                let Ok(u) = url::Url::parse(url) else { return Access::Allowed };
+                let target = format!("{}{}", u.path(), u.query().map_or(String::new(), |q| format!("?{q}")));
+                if entry.rules.allowed(&e.robots_agent, &target) { Access::Allowed } else { Access::Disallowed(None) }
+            }
+        }
     }
 
-    /// (rules, expires at, error); 5xx and network errors disallow everything for a while.
-    async fn fetch_robots(&self, h: usize, url: &str) -> (Arc<Robots>, f64, Option<String>) {
+    /// Fetch robots.txt; `fails` = failed fetches before this one. 5xx and network errors disallow everything
+    /// until the next fetch: after the backoff delay, or after `robots_error_ttl` once attempts run out.
+    async fn fetch_robots(&self, h: usize, url: &str, fails: u32) -> RobotsEntry {
+        let ok = |rules| RobotsEntry { rules: Arc::new(rules), expires: f64::INFINITY, error: None, fails: 0 };
         let Ok(robots_url) = url::Url::parse(url).and_then(|u| u.join("/robots.txt")) else {
-            return (Arc::new(Robots::default()), f64::INFINITY, None);
+            return ok(Robots::default());
         };
         let (status, body, why) = match self.client.get(robots_url).send().await {
             Ok(r) => {
@@ -317,14 +350,16 @@ impl Inner {
             Err(e) => (599, vec![], error_text(&e)),
         };
         if status >= 500 {
-            let expires = self.now() + self.cfg.engine.robots_error_ttl;
-            return (Arc::new(Robots::parse(DENY_ALL)), expires, Some(format!("robots: {why}")));
+            let (fails, retry) = (fails + 1, &self.cfg.retry);
+            let wait = if fails < retry.max_attempts { backoff(fails, retry, None, 0.0) } else { self.cfg.engine.robots_error_ttl };
+            let rules = Arc::new(Robots::parse(DENY_ALL));
+            return RobotsEntry { rules, expires: self.now() + wait, error: Some(format!("robots: {why}")), fails };
         }
         let robots = Robots::parse(&String::from_utf8_lossy(&body)); // RFC 9309: robots.txt is UTF-8
         if let Some(delay) = robots.crawl_delay(&self.cfg.engine.robots_agent).filter(|d| *d > 0.0) {
             self.state.lock().unwrap().frontier.hosts[h].cap_rate(1.0 / delay);
         }
-        (Arc::new(robots), f64::INFINITY, None)
+        ok(robots)
     }
 
     fn finish(&self, res: Response) {

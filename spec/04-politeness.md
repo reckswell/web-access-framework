@@ -62,9 +62,13 @@ share one fetch. The fetch does not count against the host's pacing.
 | --- | --- |
 | 2xx | Parse the body |
 | 4xx (incl. 404) | Allow everything |
-| 5xx, timeout or network error | Disallow everything for `robots_error_ttl` seconds, then fetch again |
+| 5xx, timeout or network error | Disallow everything until the next fetch, after the backoff delay of [05-errors.md](05-errors.md); after `retry.max_attempts` failed fetches in a row, wait `robots_error_ttl` seconds instead and start over |
 
-Tasks refused because robots.txt could not be fetched finish with `robots_disallowed` and
+While failed fetches are being retried, tasks for the host re-enter the frontier when the next fetch is due
+(without using an attempt or holding a worker) and emit `retry` with `attempt` = failed fetches so far and
+`reason` = the error below. A passing DNS or connection failure thus does not drop a host from the run.
+
+Tasks refused once the fetches run out finish with `robots_disallowed` and
 `error = "robots: <reason>"`, where the reason is the status (`robots: 503`) or the error text of
 [05-errors.md](05-errors.md) (`robots: timeout`, `robots: network: ...`). This keeps unreachable hosts
 apart from real `Disallow` rules in the output.

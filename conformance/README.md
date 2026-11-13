@@ -14,7 +14,7 @@ python conformance/run.py -k pacing -- python -m webaccess
 
 | File | Purpose |
 | --- | --- |
-| `server.py` | Mock site: `/ok`, `/status/<code>`, `/flaky`, `/ratelimit`, `/slow`, `/challenge`, `/redirect`, `/bigheader`, `/site/<n>`, robots.txt (503 when requested as `localhost`). Records every hit. Run it alone with `python conformance/server.py`. |
+| `server.py` | Mock site: `/ok`, `/status/<code>`, `/flaky`, `/ratelimit`, `/slow`, `/challenge`, `/redirect`, `/bigheader`, `/site/<n>`, robots.txt (503 to the first two fetches as `localhost`). Records every hit. Run it alone with `python conformance/server.py`. |
 | `cases.json` | Each case: config overrides, input URLs and expectations (outcomes, record fields and key order, hit counts, minimum gaps between hits, event log). |
 | `run.py` | Writes each case's config and input, runs the CLI, and checks the output. |
 

@@ -5,13 +5,13 @@ Example: python conformance/run.py -- python -m webaccess
          python conformance/run.py -- rust/target/release/webaccess
 """
 import json, subprocess, sys, tempfile, time, urllib.request
+from collections import Counter
 from pathlib import Path
 from server import serve
 
 HERE = Path(__file__).parent
 SCHEMA = json.loads((HERE.parent / "spec/schemas/event.schema.json").read_text(encoding="utf-8"))
-SUMMARY_FIELDS = next(c["then"]["required"] for c in SCHEMA["allOf"]
-                      if c["if"]["properties"]["event"].get("const") == "summary")
+REQUIRED = {c["if"]["properties"]["event"]["const"]: c["then"]["required"] for c in SCHEMA["allOf"]}  # per event
 
 
 def toml(d, prefix=""):
@@ -84,11 +84,15 @@ def check(case, records, base, tmp):
         if summary is None:
             errs.append("event log has no summary event")
         else:
-            errs += [f"summary lacks {k}" for k in SUMMARY_FIELDS if k not in summary]
             errs += [f"summary {k}: expected {v}, got {summary.get(k)}"
                      for k, v in exp.get("summary", {}).items() if summary.get(k) != v]
         if any("ts" not in e or "event" not in e for e in events):
             errs.append("event without ts/event")
+        errs += sorted({f"{e.get('event')} event lacks {k}" for e in events
+                        for k in REQUIRED.get(e.get("event"), ()) if k not in e})
+        counts = Counter(e.get("event") for e in events)
+        errs += [f"{k} events: expected {v}, got {counts[k]}"
+                 for k, v in exp.get("event_counts", {}).items() if counts[k] != v]
     return errs
 
 

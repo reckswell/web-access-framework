@@ -395,8 +395,12 @@
    }
   },
   {
-   "name": "unreachable robots.txt is reported",
-   "config": {},
+   "name": "unreachable robots.txt is retried, then reported",
+   "config": {
+    "retry": {
+     "max_attempts": 2
+    }
+   },
    "urls": [
     "{LOCAL}/ok"
    ],
@@ -411,7 +415,37 @@
     ],
     "hits": {
      "/ok": 0,
-     "/robots.txt": 1
+     "/robots.txt": 2
+    }
+   }
+  },
+  {
+   "name": "briefly unreachable robots.txt is fetched again",
+   "config": {
+    "engine": {
+     "log_path": "{tmp}/events.jsonl"
+    }
+   },
+   "urls": [
+    "{LOCAL}/ok"
+   ],
+   "expect": {
+    "records": [
+     {
+      "url": "{LOCAL}/ok",
+      "outcome": "ok",
+      "attempts": 1,
+      "error": null
+     }
+    ],
+    "hits": {
+     "/ok": 1,
+     "/robots.txt": 3
+    },
+    "events": true,
+    "event_counts": {
+     "retry": 2,
+     "request": 1
     }
    }
   },

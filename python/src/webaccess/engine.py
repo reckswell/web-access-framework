@@ -154,7 +154,12 @@ class Engine:
         try:
             if host.blocked:
                 return self._finish(Response(task, task.url, None, "host_blocked", attempts=attempts))
-            allowed, why = await self._allowed(host, task.url)
+            allowed, why, retry = await self._allowed(host, task.url)
+            if retry:  # robots.txt failed and is fetched again soon: the task waits for that
+                fails, delay = retry
+                self._emit("retry", url=task.url, host=host.key, attempt=fails, delay=round(delay, 3), reason=why)
+                asyncio.get_running_loop().call_later(delay, self._requeue, host, task, attempts)
+                return
             if not allowed:  # `why` says when robots.txt could not be fetched
                 return self._finish(Response(task, task.url, None, "robots_disallowed", attempts=attempts, error=why))
             attempts += 1
@@ -209,19 +214,26 @@ class Engine:
 
     # ---- robots.txt ---------------------------------------------------------------------------
     async def _allowed(self, host, url):
-        """(allowed, error): error is set when robots.txt could not be fetched."""
-        e = self.cfg.engine
+        """(allowed, error, retry): error is set when robots.txt could not be fetched, and retry =
+        (failed fetches, seconds to the next fetch) while it is retried with backoff, up to
+        `retry.max_attempts` fetches. After that the host is disallowed for `robots_error_ttl`."""
+        e, most = self.cfg.engine, self.cfg.retry.max_attempts
         if not e.respect_robots:
-            return True, None
+            return True, None, None
         t = host.robots
         if t is None or (t.done() and t.result()[1] < time.monotonic()):
-            host.robots = t = asyncio.ensure_future(self._fetch_robots(host, url))
-        robots, _, why = await asyncio.shield(t)
+            fails = t.result()[3] if t and t.result()[3] < most else 0  # 0: start over
+            host.robots = t = asyncio.ensure_future(self._fetch_robots(host, url, fails))
+        robots, expires, why, fails = await asyncio.shield(t)
+        if why and fails < most:
+            return False, why, (fails, max(0.0, expires - time.monotonic()))
         u = urlsplit(url)
-        return robots.allowed(e.robots_agent, (u.path or "/") + (f"?{u.query}" if u.query else "")), why
+        return robots.allowed(e.robots_agent, (u.path or "/") + (f"?{u.query}" if u.query else "")), why, None
 
-    async def _fetch_robots(self, host, url):
-        """(rules, expires at, error); 5xx and network errors disallow everything for a while."""
+    async def _fetch_robots(self, host, url, fails):
+        """(rules, expires at, error, failed fetches in a row); `fails` counts those before this one.
+        5xx and network errors disallow everything until the next fetch: after the backoff delay, or
+        after `robots_error_ttl` once attempts run out."""
         u, why = urlsplit(url), None
         proxy, proxy_auth = self.proxy_for(url)
         try:
@@ -231,12 +243,13 @@ class Engine:
         except (Refused, asyncio.TimeoutError, aiohttp.ClientError, OSError) as exc:
             status, why = 599, error_text(exc)
         if status >= 500:
-            ttl = self.cfg.engine.robots_error_ttl
-            return Robots(DENY_ALL), time.monotonic() + ttl, f"robots: {why or status}"
+            fails, retry = fails + 1, self.cfg.retry
+            wait = backoff(fails, retry) if fails < retry.max_attempts else self.cfg.engine.robots_error_ttl
+            return Robots(DENY_ALL), time.monotonic() + wait, f"robots: {why or status}", fails
         robots = Robots(body.decode("utf-8", "replace"))  # RFC 9309: robots.txt is UTF-8
         if (delay := robots.crawl_delay(self.cfg.engine.robots_agent)) and delay > 0:
             host.cap_rate(1 / delay)
-        return robots, INF, None
+        return robots, INF, None, 0
 
     # ---- results ------------------------------------------------------------------------------
     def _finish(self, res):

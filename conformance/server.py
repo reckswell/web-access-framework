@@ -1,7 +1,7 @@
 """Local mock website for the conformance suite. Standard library only, runs on any OS.
 
 Every request is recorded so cases can assert on hit counts and timing. Requested as `localhost`, robots.txt
-answers 503, so cases can test an unreachable robots.txt.
+answers 503 to the first two fetches, so cases can test an unreachable and a briefly unreachable robots.txt.
 """
 import json, threading, time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -18,8 +18,12 @@ class State:
     def hit(self, path):  # record a request; returns how many times this exact path+query was seen
         with self.lock:
             self.hits.append((time.monotonic(), path))
-            self.counters[path] = self.counters.get(path, 0) + 1
-            return self.counters[path]
+        return self.count(path)
+
+    def count(self, key):  # how many times `key` was seen, this one included
+        with self.lock:
+            self.counters[key] = self.counters.get(key, 0) + 1
+            return self.counters[key]
 
 
 def site_page(n, limit=6):
@@ -54,7 +58,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, json.dumps(ts), "application/json")
         n = self.state.hit(self.path)
         if p == "/robots.txt":
-            down = self.headers.get("Host", "").startswith("localhost")
+            down = self.headers.get("Host", "").startswith("localhost") and self.state.count("localhost robots") <= 2
             return self.send(503, "down") if down else self.send(200, ROBOTS)
         if p == "/ok":
             return self.send(200, "ok")
