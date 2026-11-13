@@ -31,7 +31,9 @@ Every run uses level `max`. Options:
 | `--input FILE` | | Live mode: fetch these URLs from the internet instead |
 
 Each run prints a row and appends it, with the machine's OS, cores and RAM, to `out/bench/results.jsonl`.
-`sites/s` is pages finished per second; `CPU %` is the engine's share of all cores, `CPU ms/site` its CPU time per site and `kernel %` the part spent in the OS; `server CPU s` is
+`sites/s` is pages finished per second over the whole run, and `99% s` the seconds until 99% had finished
+(`s_to_90pct` is in the JSON too). On live sites the two differ: a few hosts that ask for long Retry-After waits
+can stretch a run to half an hour. `CPU %` is the engine's share of all cores, `CPU ms/site` its CPU time per site and `kernel %` the part spent in the OS; `server CPU s` is
 what the local server used on the same machine.
 
 Linux and Windows route all of `127.0.0.0/8` to loopback. macOS routes only `127.0.0.1`, so local mode

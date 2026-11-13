@@ -80,16 +80,18 @@ def run_once(a, workers, out, input_file, env):
     """One engine run -> result dict."""
     resources = {"level": "max", "max_concurrency": workers, "max_memory_mb": a.memory_mb, "threads": a.threads}
     lines = ["[resources]"] + [f"{k} = {json.dumps(v)}" for k, v in resources.items() if v]
-    lines += ["[engine]", "stats_interval = 0", f"https_only = {str(bool(a.input)).lower()}",
-              "[goal]", 'type = "fetch"']
     tag = f"{a.port}-w{workers}-t{a.threads}" + ("-live" if a.input else f"-d{a.delay_ms}-{a.server_close}")  # one set of files per run
     cfg, records, log = out / f"{tag}.toml", out / f"{tag}-records.jsonl", out / f"{tag}-stderr.txt"
+    events = out / f"{tag}-events.jsonl"
+    events.unlink(missing_ok=True)
+    lines += ["[engine]", "stats_interval = 0", f"https_only = {str(bool(a.input)).lower()}",
+              f"log_path = {json.dumps(events.as_posix())}", "[goal]", 'type = "fetch"']
     cfg.write_text("\n".join(lines) + "\n")
     env = dict(env)
     cmd = [str(ROOT / f"rust/target/release/webaccess{EXE}")] if a.port == "rust" else python_cmd(env)
     server = None if a.input else start_server(a.server_port, a.delay_ms, a.page_kb, a.server_close)
     with open(log, "w") as err:
-        start = time.monotonic()
+        start, start_ts = time.monotonic(), time.time()
         p = subprocess.Popen(cmd + ["run", str(cfg), "--input", str(input_file), "--output", str(records)],
                              stderr=err, env=env)
         user, kernel, peak = wait_measured(p)
@@ -104,10 +106,13 @@ def run_once(a, workers, out, input_file, env):
     if p.returncode or not summary:
         sys.exit(f"engine failed (exit {p.returncode}):\n{text[-2000:]}")
     cores = os.cpu_count() or 1
+    done = sorted(e["ts"] for e in map(json.loads, events.read_text(encoding="utf-8").splitlines()) if e["event"] == "request")
+    to_pct = lambda pct: round(done[max(0, -(-len(done) * pct // 100) - 1)] - start_ts, 2) if done else None
     return {"port": a.port, "mode": "live" if a.input else "local", "workers": summary.get("workers"),
             "threads": a.threads or cores, "memory_budget_mb": a.memory_mb or 4096,
             "sites": summary["finished"], "ok": summary["outcomes"].get("ok", 0),
             "sites_per_s": round(summary["finished"] / summary["elapsed"], 1), "wall_s": round(wall, 2),
+            "s_to_90pct": to_pct(90), "s_to_99pct": to_pct(99),
             "engine_cpu_s": round(cpu, 2), "engine_kernel_s": round(kernel, 2),
             "cpu_used_pct": round(100 * cpu / wall / cores, 1), "cpu_ms_per_site": round(1000 * cpu / summary["finished"], 3),
             "peak_mb": round(peak, 1), "server_cpu_s": round(server_cpu, 2),
@@ -148,10 +153,10 @@ def main():
     machine = {"os": platform.platform(), "cpu": platform.processor() or platform.machine(),
                "cores": os.cpu_count(), "ram_gb": round(total_ram_gb(), 1), "python": platform.python_version()}
     print(json.dumps(machine))
-    print(f"{'port':6} {'workers':>7} {'sites/s':>8} {'ok':>7} {'wall s':>7} {'CPU %':>6} {'peak MB':>8} {'server CPU s':>12} {'CPU ms/site':>11} {'kernel %':>8}")
+    print(f"{'port':6} {'workers':>7} {'sites/s':>8} {'ok':>7} {'wall s':>7} {'99% s':>7} {'CPU %':>6} {'peak MB':>8} {'server CPU s':>12} {'CPU ms/site':>11} {'kernel %':>8}")
     for w in (int(x) for x in a.workers.split(",")):
         r = run_once(a, w, out, input_file, env)
-        print(f"{r['port']:6} {r['workers']:>7} {r['sites_per_s']:>8} {r['ok']:>7} {r['wall_s']:>7} "
+        print(f"{r['port']:6} {r['workers']:>7} {r['sites_per_s']:>8} {r['ok']:>7} {r['wall_s']:>7} {r['s_to_99pct']:>7} "
               f"{r['cpu_used_pct']:>6} {r['peak_mb']:>8} {r['server_cpu_s']:>12} {r['cpu_ms_per_site']:>11} "
               f"{round(100 * r['engine_kernel_s'] / max(r['engine_cpu_s'], 1e-9)):>8}", flush=True)
         with open(out / "results.jsonl", "a") as f:
