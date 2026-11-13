@@ -17,6 +17,7 @@ from .sinks import make_sinks
 from .urls import host_key, normalize
 
 INF = float("inf")
+TICK = time.get_clock_info("monotonic").resolution  # asyncio runs timers up to one tick early
 
 
 class Refused(Exception):
@@ -221,7 +222,7 @@ class Engine:
         if not e.respect_robots:
             return True, None, None
         t = host.robots
-        if t is None or (t.done() and t.result()[1] < time.monotonic()):
+        if t is None or (t.done() and t.result()[1] <= time.monotonic() + TICK):  # a waiting task is due
             fails = t.result()[3] if t and t.result()[3] < most else 0  # 0: start over
             host.robots = t = asyncio.ensure_future(self._fetch_robots(host, url, fails))
         robots, expires, why, fails = await asyncio.shield(t)
