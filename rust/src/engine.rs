@@ -2,7 +2,7 @@
 use crate::config::Config;
 use crate::frontier::{Frontier, Pop};
 use crate::goals::Goal;
-use crate::limits::{backoff, classify, parse_retry_after, Host};
+use crate::limits::{backoff, classify, parse_retry_after, Host, RobotsEntry};
 use crate::model::{Output, Response, Task};
 use crate::robots::{Robots, DENY_ALL};
 use crate::safety::Safety;
@@ -39,6 +39,7 @@ struct Inner {
     log: Mutex<Option<BufWriter<File>>>,
     wake: Notify,
     slots: Arc<Semaphore>,
+    workers: usize,
     start: Instant,
 }
 
@@ -52,13 +53,31 @@ impl std::fmt::Display for Refused {
 }
 impl std::error::Error for Refused {}
 
+/// A request error -> the `error` text of spec/05-errors.md.
+fn error_text(e: &reqwest::Error) -> String {
+    let causes = || std::iter::successors(std::error::Error::source(e), |s| s.source());
+    let refused = causes().find_map(|s| s.downcast_ref::<Refused>()).map(|r| r.0);
+    if e.is_timeout() { "timeout".into() } else if let Some(why) = refused { why.into() }
+    else if e.is_redirect() { "redirects".into() }
+    else if causes().any(|s| s.to_string() == "dns error") { "network: dns".into() } // hyper-util's resolver error
+    else { format!("network: {}", if e.is_connect() { "connect" } else { "request" }) }
+}
+
+/// What robots.txt says about a URL.
+enum Access {
+    Allowed,
+    Disallowed(Option<String>), // the error when robots.txt could not be fetched
+    Retry { delay: f64, fails: u32, why: String }, // robots.txt failed and is fetched again after `delay`
+}
+
 fn unix_now() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }
 
-/// Raise the soft open-file limit where the OS has one (spec/09-platforms.md); None on Windows.
-pub fn open_file_limit() -> Option<u64> {
-    if cfg!(windows) { None } else { rlimit::increase_nofile_limit(10240).ok() }
+/// Raise the soft open-file limit to at least `need` where the OS has one (spec/02-config.md Resources);
+/// None on Windows. rlimit caps the request at the hard limit (and macOS's kern.maxfilesperproc).
+pub fn open_file_limit(need: u64) -> Option<u64> {
+    if cfg!(windows) { None } else { rlimit::increase_nofile_limit(need.max(10240)).ok() }
 }
 
 impl Engine {
@@ -67,7 +86,7 @@ impl Engine {
         let e = &cfg.engine;
         let headers = e.headers.iter()
             .filter_map(|(k, v)| Some((k.parse::<reqwest::header::HeaderName>().ok()?, v.parse().ok()?))).collect();
-        let workers = cfg.workers(open_file_limit(), None);
+        let workers = cfg.workers(open_file_limit(cfg.workers(None, None) as u64 + 64), None);
         let safety = Arc::new(Safety::from_config(e)?);
         let (guard, max_redirects) = (safety.clone(), e.max_redirects);
         let redirects = reqwest::redirect::Policy::custom(move |hop| { // every hop passes the safety check
@@ -79,6 +98,7 @@ impl Engine {
             .timeout(Duration::from_secs_f64(e.request_timeout))
             .redirect(redirects)
             .pool_max_idle_per_host(workers.min(64))
+            .pool_idle_timeout(Duration::from_secs_f64(e.idle_timeout)) // idle connections hold ~64 KB each
             .build().map_err(|err| err.to_string())?;
         let log = if e.log_path.is_empty() { None } else {
             if let Some(dir) = std::path::Path::new(&e.log_path).parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -88,7 +108,7 @@ impl Engine {
         };
         Ok(Self(Arc::new(Inner {
             goal, client, safety, state: Default::default(), sinks: Mutex::new(sinks), log: Mutex::new(log),
-            wake: Notify::new(), slots: Arc::new(Semaphore::new(workers)), start: Instant::now(), cfg,
+            wake: Notify::new(), slots: Arc::new(Semaphore::new(workers)), workers, start: Instant::now(), cfg,
         })))
     }
 
@@ -134,10 +154,10 @@ impl Inner {
     fn add(&self, task: Task) {
         let key = normalize(&task.url);
         let mut s = self.state.lock().unwrap();
-        if let Some(k) = key.as_ref().filter(|_| task.dedup && task.method == "GET") {
-            if !s.seen.insert(k.clone()) {
-                return;
-            }
+        if let Some(k) = key.as_ref().filter(|_| task.dedup && task.method == "GET")
+            && !s.seen.insert(k.clone())
+        {
+            return;
         }
         s.outstanding += 1;
         let refused = if key.is_none() { Some("invalid") } else { self.safety.check(&task.url) };
@@ -185,56 +205,72 @@ impl Inner {
         }
     }
 
-    async fn handle(self: Arc<Self>, h: usize, task: Task, mut attempts: u32) {
+    async fn handle(self: Arc<Self>, h: usize, task: Task, attempts: u32) {
         let (blocked, key) = {
             let s = self.state.lock().unwrap();
             (s.frontier.hosts[h].blocked, s.frontier.hosts[h].key.clone())
         };
         if blocked {
             self.finish(Response::bare(task, "host_blocked", attempts));
-        } else if !self.allowed(h, &task.url).await {
-            self.finish(Response::bare(task, "robots_disallowed", attempts));
         } else {
-            attempts += 1;
-            let mut res = self.request(task, attempts).await;
-            let kind = res.error.as_deref().map(|e| e.split(':').next().unwrap_or(e));
-            let (outcome, signal, retry) = classify(res.status, kind, &res.body);
-            let ra = res.headers.get("retry-after").and_then(|v| parse_retry_after(v, unix_now()));
-            let (events, max_ra) = {
-                let mut s = self.state.lock().unwrap();
-                s.requests += 1;
-                let now = self.now();
-                let host = &mut s.frontier.hosts[h];
-                let (events, max_ra) = (host.apply(signal, now, ra), host.cfg.max_retry_after);
-                if events.iter().any(|(name, _)| *name == "host_blocked") {
-                    s.blocked_hosts.push(key.clone());
+            match self.allowed(h, &task.url).await {
+                Access::Allowed => self.attempt(h, key, task, attempts + 1).await,
+                Access::Disallowed(why) =>
+                    self.finish(Response { error: why, ..Response::bare(task, "robots_disallowed", attempts) }),
+                Access::Retry { delay, fails, why } => { // the task waits for the next robots.txt fetch
+                    self.emit("retry", json!({"url": task.url, "host": key, "attempt": fails,
+                                              "delay": (delay * 1e3).round() / 1e3, "reason": why}));
+                    self.requeue(h, task, attempts, delay);
                 }
-                (events, max_ra)
-            };
-            for (name, mut fields) in events {
-                fields["host"] = key.clone().into();
-                self.emit(name, fields);
-            }
-            let t = &res.task;
-            let safe = matches!(t.method.as_str(), "GET" | "HEAD") || t.meta.get("retry_safe") == Some(&Value::Bool(true));
-            if retry && safe && attempts < self.cfg.retry.max_attempts {
-                let delay = backoff(attempts, &self.cfg.retry, ra, max_ra);
-                let reason = res.status.map_or_else(|| kind.unwrap_or("").to_string(), |s| s.to_string());
-                self.emit("retry", json!({"url": t.url, "host": key, "attempt": attempts,
-                                          "delay": (delay * 1e3).round() / 1e3, "reason": reason}));
-                let me = self.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs_f64(delay)).await;
-                    me.state.lock().unwrap().frontier.push(h, res.task, attempts);
-                    me.wake.notify_one();
-                });
-            } else {
-                res.outcome = outcome;
-                self.finish(res);
             }
         }
         self.state.lock().unwrap().frontier.release(h);
         self.wake.notify_one();
+    }
+
+    /// Re-add a task to the frontier after `delay` seconds; it stays outstanding meanwhile.
+    fn requeue(self: &Arc<Self>, h: usize, task: Task, attempts: u32, delay: f64) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs_f64(delay)).await;
+            me.state.lock().unwrap().frontier.push(h, task, attempts);
+            me.wake.notify_one();
+        });
+    }
+
+    /// Send the request, feed the host limiter, then retry or finish (spec/03-engine.md steps 4-6).
+    async fn attempt(self: &Arc<Self>, h: usize, key: String, task: Task, attempts: u32) {
+        let mut res = self.request(task, attempts).await;
+        let kind = res.error.as_deref().map(|e| e.split(':').next().unwrap_or(e));
+        let (outcome, signal, retry) = classify(res.status, kind, &res.body);
+        let ra = res.headers.get("retry-after").and_then(|v| parse_retry_after(v, unix_now()));
+        let (events, max_ra) = {
+            let mut s = self.state.lock().unwrap();
+            s.requests += 1;
+            let now = self.now();
+            let host = &mut s.frontier.hosts[h];
+            let (events, max_ra) = (host.apply(signal, now, ra), host.cfg.max_retry_after);
+            if events.iter().any(|(name, _)| *name == "host_blocked") {
+                s.blocked_hosts.push(key.clone());
+            }
+            (events, max_ra)
+        };
+        for (name, mut fields) in events {
+            fields["host"] = key.clone().into();
+            self.emit(name, fields);
+        }
+        let t = &res.task;
+        let safe = matches!(t.method.as_str(), "GET" | "HEAD") || t.meta.get("retry_safe") == Some(&Value::Bool(true));
+        if retry && safe && attempts < self.cfg.retry.max_attempts {
+            let delay = backoff(attempts, &self.cfg.retry, ra, max_ra);
+            let reason = res.status.map_or_else(|| kind.unwrap_or("").to_string(), |s| s.to_string());
+            self.emit("retry", json!({"url": t.url, "host": key, "attempt": attempts,
+                                      "delay": (delay * 1e3).round() / 1e3, "reason": reason}));
+            self.requeue(h, res.task, attempts, delay);
+        } else {
+            res.outcome = outcome;
+            self.finish(res);
+        }
     }
 
     async fn request(&self, task: Task, attempts: u32) -> Response {
@@ -268,54 +304,70 @@ impl Inner {
         match result {
             Ok((status, url, headers, body)) =>
                 Response { task, url, status: Some(status), outcome: "", headers, body, attempts, elapsed_ms, error: None },
-            Err(e) => {
-                let refused = std::iter::successors(std::error::Error::source(&e), |s| s.source())
-                    .find_map(|s| s.downcast_ref::<Refused>()).map(|r| r.0);
-                let error = if e.is_timeout() { "timeout".into() } else if let Some(why) = refused { why.into() }
-                            else if e.is_redirect() { "redirects".into() }
-                            else { format!("network: {}", if e.is_connect() { "connect" } else { "request" }) };
-                Response { error: Some(error), elapsed_ms, ..Response::bare(task, "", attempts) }
-            }
+            Err(e) => Response { error: Some(error_text(&e)), elapsed_ms, ..Response::bare(task, "", attempts) },
         }
     }
 
-    async fn allowed(&self, h: usize, url: &str) -> bool {
-        let e = &self.cfg.engine;
+    /// Whether robots.txt allows `url`. A failed fetch is retried with backoff, up to `retry.max_attempts`
+    /// fetches; tasks wait for each one. After that the host is disallowed for `robots_error_ttl`.
+    async fn allowed(&self, h: usize, url: &str) -> Access {
+        let (e, max) = (&self.cfg.engine, self.cfg.retry.max_attempts);
         if !e.respect_robots {
-            return true;
+            return Access::Allowed;
         }
         let slot = self.state.lock().unwrap().frontier.hosts[h].robots.clone();
-        let robots = {
+        let entry = {
             let mut slot = slot.lock().await; // one fetch per host; concurrent first tasks wait here
-            if slot.as_ref().is_none_or(|(_, expires)| *expires < self.now()) {
-                *slot = Some(self.fetch_robots(h, url).await);
+            if slot.as_ref().is_none_or(|r| r.expires < self.now()) {
+                let fails = slot.as_ref().map_or(0, |r| if r.fails < max { r.fails } else { 0 }); // 0: start over
+                *slot = Some(self.fetch_robots(h, url, fails).await);
             }
-            slot.as_ref().unwrap().0.clone()
+            slot.clone().unwrap()
         };
-        let Ok(u) = url::Url::parse(url) else { return true };
-        let target = format!("{}{}", u.path(), u.query().map_or(String::new(), |q| format!("?{q}")));
-        robots.allowed(&e.robots_agent, &target)
+        match entry.error {
+            Some(why) if entry.fails < max => Access::Retry { delay: (entry.expires - self.now()).max(0.0), fails: entry.fails, why },
+            Some(why) => Access::Disallowed(Some(why)),
+            None => {
+                let Ok(u) = url::Url::parse(url) else { return Access::Allowed };
+                let target = format!("{}{}", u.path(), u.query().map_or(String::new(), |q| format!("?{q}")));
+                if entry.rules.allowed(&e.robots_agent, &target) { Access::Allowed } else { Access::Disallowed(None) }
+            }
+        }
     }
 
-    async fn fetch_robots(&self, h: usize, url: &str) -> (Arc<Robots>, f64) {
+    /// Fetch robots.txt; `fails` = failed fetches before this one. 5xx and network errors disallow everything
+    /// until the next fetch: after the backoff delay, or after `robots_error_ttl` once attempts run out.
+    async fn fetch_robots(&self, h: usize, url: &str, fails: u32) -> RobotsEntry {
+        let ok = |rules| RobotsEntry { rules: Arc::new(rules), expires: f64::INFINITY, error: None, fails: 0 };
         let Ok(robots_url) = url::Url::parse(url).and_then(|u| u.join("/robots.txt")) else {
-            return (Arc::new(Robots::default()), f64::INFINITY);
+            return ok(Robots::default());
         };
-        let (status, text) = match self.client.get(robots_url).send().await {
-            Ok(r) => { let s = r.status().as_u16(); (s, if s < 300 { r.text().await.unwrap_or_default() } else { String::new() }) }
-            Err(_) => (599, String::new()),
+        let (status, body, why) = match self.client.get(robots_url).send().await {
+            Ok(r) => {
+                let s = r.status().as_u16();
+                (s, if s < 300 { r.bytes().await.unwrap_or_default().to_vec() } else { vec![] }, s.to_string())
+            }
+            Err(e) => (599, vec![], error_text(&e)),
         };
         if status >= 500 {
-            return (Arc::new(Robots::parse(DENY_ALL)), self.now() + self.cfg.engine.robots_error_ttl);
+            let (fails, retry) = (fails + 1, &self.cfg.retry);
+            let wait = if fails < retry.max_attempts { backoff(fails, retry, None, 0.0) } else { self.cfg.engine.robots_error_ttl };
+            let rules = Arc::new(Robots::parse(DENY_ALL));
+            return RobotsEntry { rules, expires: self.now() + wait, error: Some(format!("robots: {why}")), fails };
         }
-        let robots = Robots::parse(&text);
+        let robots = Robots::parse(&String::from_utf8_lossy(&body)); // RFC 9309: robots.txt is UTF-8
         if let Some(delay) = robots.crawl_delay(&self.cfg.engine.robots_agent).filter(|d| *d > 0.0) {
             self.state.lock().unwrap().frontier.hosts[h].cap_rate(1.0 / delay);
         }
-        (Arc::new(robots), f64::INFINITY)
+        ok(robots)
     }
 
     fn finish(&self, res: Response) {
+        // a redirect target counts as seen, so links back to it are not fetched again
+        if res.url != res.task.url && res.task.dedup && res.task.method == "GET"
+            && let Some(key) = normalize(&res.url) {
+            self.state.lock().unwrap().seen.insert(key);
+        }
         self.emit("request", json!({"url": res.task.url, "host": host_key(&res.task.url), "status": res.status,
                                     "outcome": res.outcome, "attempts": res.attempts, "elapsed_ms": res.elapsed_ms,
                                     "error": res.error}));
@@ -351,7 +403,8 @@ impl Inner {
     fn summary(&self) -> Value {
         let s = self.state.lock().unwrap();
         json!({"elapsed": (self.now() * 1e3).round() / 1e3, "finished": s.finished, "requests": s.requests,
-               "outcomes": s.outcomes, "hosts": s.frontier.hosts.len(), "blocked_hosts": s.blocked_hosts})
+               "outcomes": s.outcomes, "hosts": s.frontier.hosts.len(), "blocked_hosts": s.blocked_hosts,
+               "workers": self.workers})
     }
 
     async fn stats(self: Arc<Self>) {

@@ -57,7 +57,16 @@ pub fn backoff(attempts: u32, retry: &Retry, retry_after: Option<f64>, max_retry
 }
 
 pub type Event = (&'static str, Value);
-type RobotsSlot = Arc<tokio::sync::Mutex<Option<(Arc<Robots>, f64)>>>; // (rules, expires at)
+type RobotsSlot = Arc<tokio::sync::Mutex<Option<RobotsEntry>>>;
+
+/// A host's last robots.txt fetch. `error` is set when it failed; `fails` counts failed fetches in a row.
+#[derive(Clone)]
+pub struct RobotsEntry {
+    pub rules: Arc<Robots>,
+    pub expires: f64,
+    pub error: Option<String>,
+    pub fails: u32,
+}
 
 /// Per-host politeness state plus the frontier's scheduling fields.
 pub struct Host {

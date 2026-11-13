@@ -5,10 +5,13 @@ Example: python conformance/run.py -- python -m webaccess
          python conformance/run.py -- rust/target/release/webaccess
 """
 import json, subprocess, sys, tempfile, time, urllib.request
+from collections import Counter
 from pathlib import Path
 from server import serve
 
 HERE = Path(__file__).parent
+SCHEMA = json.loads((HERE.parent / "spec/schemas/event.schema.json").read_text(encoding="utf-8"))
+REQUIRED = {c["if"]["properties"]["event"]["const"]: c["then"]["required"] for c in SCHEMA["allOf"]}  # per event
 
 
 def toml(d, prefix=""):
@@ -56,6 +59,9 @@ def check(case, records, base, tmp):
             ok = (got.get(k) is not None) if v is True else got.get(k) == v
             if not ok:
                 errs.append(f"{want['url']}: {k} expected {v!r}, got {got.get(k)!r}")
+    for r in records if "key_order" in exp else ():
+        if list(r) != exp["key_order"]:
+            errs.append(f"{r.get('url')}: keys {list(r)}, expected {exp['key_order']}")
     counts = {}
     for r in records:
         counts[r.get("outcome")] = counts.get(r.get("outcome"), 0) + 1
@@ -74,10 +80,19 @@ def check(case, records, base, tmp):
     if exp.get("events"):
         log = Path(tmp, "events.jsonl")
         events = [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
-        if not any(e.get("event") == "summary" for e in events):
+        summary = next((e for e in events if e.get("event") == "summary"), None)
+        if summary is None:
             errs.append("event log has no summary event")
+        else:
+            errs += [f"summary {k}: expected {v}, got {summary.get(k)}"
+                     for k, v in exp.get("summary", {}).items() if summary.get(k) != v]
         if any("ts" not in e or "event" not in e for e in events):
             errs.append("event without ts/event")
+        errs += sorted({f"{e.get('event')} event lacks {k}" for e in events
+                        for k in REQUIRED.get(e.get("event"), ()) if k not in e})
+        counts = Counter(e.get("event") for e in events)
+        errs += [f"{k} events: expected {v}, got {counts[k]}"
+                 for k, v in exp.get("event_counts", {}).items() if counts[k] != v]
     return errs
 
 

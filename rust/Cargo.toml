@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 encoding_rs = "0.8.44"
 fastrand = "2.5.0"
+html5ever = "0.40.1"
 httpdate = "1.0.3"
 regex = "1.13.1"
 reqwest = { version = "0.13", default-features = false, features = ["brotli", "charset", "cookies", "deflate", "gzip", "http2", "rustls-no-provider", "system-proxy"] }
@@ -16,5 +17,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_ignored = "0.1.14"
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "sync", "signal"] }
-toml = "1.2.1"
+toml = { version = "1.2.1", features = ["preserve_order"] }
 url = "2.5.8"
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["net", "io-util"] } # for examples/bench_server.rs

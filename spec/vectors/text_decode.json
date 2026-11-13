@@ -60,6 +60,36 @@
    "content_type": "text/plain; charset=utf-8",
    "body_hex": "6f6bff",
    "text": "ok�"
+  },
+  {
+   "name": "shift_jis label decodes as Windows-31J (WHATWG)",
+   "content_type": "text/html; charset=shift_jis",
+   "body_hex": "81608740",
+   "text": "～①"
+  },
+  {
+   "name": "euc-kr label decodes as windows-949 (WHATWG)",
+   "content_type": "text/html; charset=euc-kr",
+   "body_hex": "8c63b9e6b0a2c7cf",
+   "text": "똠방각하"
+  },
+  {
+   "name": "gb2312 label decodes as GBK (WHATWG)",
+   "content_type": "text/html; charset=gb2312",
+   "body_hex": "e946",
+   "text": "镕"
+  },
+  {
+   "name": "iso-8859-1 label decodes as windows-1252 (WHATWG)",
+   "content_type": "text/html; charset=iso-8859-1",
+   "body_hex": "809394",
+   "text": "€“”"
+  },
+  {
+   "name": "labels outside the WHATWG list fall back to UTF-8",
+   "content_type": "text/html; charset=utf-7",
+   "body_hex": "2b4147452d",
+   "text": "+AGE-"
   }
  ]
 }

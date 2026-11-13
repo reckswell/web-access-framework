@@ -3,7 +3,8 @@ use crate::config::Config;
 use crate::model::{Output, Response, Task};
 use crate::urls::{host_key, join, normalize};
 use regex::Regex;
-use scraper::{Html, Selector};
+use html5ever::{driver::ParseOpts, tendril::TendrilSink, tree_builder::TreeBuilderOpts};
+use scraper::{Html, HtmlTreeSink, Selector};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
@@ -72,6 +73,22 @@ fn selector(css: &str) -> Result<Selector, String> {
     Selector::parse(css).map_err(|e| format!("bad CSS selector {css:?}: {e}"))
 }
 
+/// Parse as a browser with scripting off does, so `<noscript>` content is markup rather than raw text
+/// (scraper's default parses it as text, which leaks tags into extracted fields).
+fn parse_html(text: &str) -> Html {
+    let tree_builder = TreeBuilderOpts { scripting_enabled: false, ..Default::default() };
+    html5ever::driver::parse_document(HtmlTreeSink::new(Html::new_document()), ParseOpts { tree_builder, ..Default::default() })
+        .one(text)
+}
+
+/// Text like the DOM's textContent: `<template>` contents are not part of the page (as in Python's lexbor).
+fn text_of(el: scraper::ElementRef) -> String {
+    el.descendants()
+        .filter(|n| !n.ancestors().any(|a| a.value().as_element().is_some_and(|e| e.name() == "template")))
+        .filter_map(|n| n.value().as_text().map(|t| &**t))
+        .collect()
+}
+
 fn regex(src: &str) -> Result<Option<Regex>, String> {
     if src.is_empty() { Ok(None) } else { Regex::new(src).map(Some).map_err(|e| e.to_string()) }
 }
@@ -114,14 +131,14 @@ impl Goal for CrawlGoal {
         if !r.headers.get("content-type").is_some_and(|c| c.contains("html")) {
             return vec![Output::Record(rec)];
         }
-        let doc = Html::parse_document(&r.text());
+        let doc = parse_html(&r.text());
         for (name, css, attr) in &self.fields {
             let value = doc.select(css).next().and_then(|el| match attr {
                 Some(a) => el.value().attr(a).map(|v| match a.as_str() {
                     "href" | "src" => join(&r.url, v).unwrap_or_else(|| v.to_string()),
                     _ => v.to_string(),
                 }),
-                None => Some(el.text().collect::<String>().trim().to_string()),
+                None => Some(text_of(el).trim().to_string()),
             });
             rec.insert(name.clone(), value.map_or(Value::Null, Value::String));
         }

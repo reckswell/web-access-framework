@@ -14,6 +14,7 @@ on its own: it speeds up while responses are healthy and backs off on `429`/`503
 | [`python/`](python/README.md) | Python implementation (asyncio + aiohttp + selectolax) |
 | [`rust/`](rust/README.md) | Rust implementation (tokio + reqwest + scraper) |
 | [`conformance/`](conformance/README.md) | Mock website + test cases that every implementation must pass |
+| [`bench/`](bench/README.md) | Throughput benchmark for either implementation, on a local server or live sites |
 | [`examples/`](examples/) | Ready-to-run config files |
 
 Both implementations read the same config files, take the same CLI arguments and produce the same

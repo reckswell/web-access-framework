@@ -35,6 +35,7 @@ class Engine:
     blocked_domains: list = field(default_factory=list)
     blocklist_files: list = field(default_factory=list)
     request_timeout: float = 30.0
+    idle_timeout: float = 2.0
     max_body_bytes: int = 10 * 1024 * 1024
     max_redirects: int = 10
     log_path: str = ""

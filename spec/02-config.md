@@ -18,11 +18,12 @@ https_only = true              # refuse http:// URLs and redirects to http:// (o
 blocked_domains = []           # never contact these hosts or their subdomains (outcome `unsafe`)
 blocklist_files = []           # more blocked domains: one per line, or hosts-file lines ("0.0.0.0 bad.example")
 request_timeout = 30.0         # seconds per attempt, connect + full body
+idle_timeout = 2.0             # seconds an idle connection is kept for reuse (each one holds memory)
 max_body_bytes = 10485760      # bodies are truncated beyond this
 max_redirects = 10
 log_path = ""                  # JSONL event log; "" = no log file
 stats_interval = 5.0           # seconds between progress lines on stderr; 0 = off
-robots_error_ttl = 300.0       # seconds to treat a host as fully disallowed after robots.txt fails
+robots_error_ttl = 300.0       # seconds to treat a host as fully disallowed after robots.txt fails max_attempts times
 
 [engine.headers]               # sent with every request (task headers override)
 accept = "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8"
@@ -89,8 +90,10 @@ workers = max(1, min(max_concurrency, floor(max_memory_mb / per_request_mb), ope
 ```
 
 `open_file_limit` is the process's soft limit on open files (sockets count). On Unix, implementations
-SHOULD first try to raise the soft limit to `min(hard limit, 10240)`. Where no such limit exists
-(Windows), the term is ignored.
+SHOULD first try to raise the soft limit to `min(hard limit, max(10240, W + 64))`, where `W` is `workers`
+without the `open_file_limit` term, so a large `max_concurrency` is not capped at about 10,000. If the OS
+refuses that value (macOS caps it at `kern.maxfilesperproc`), try `min(hard limit, 10240)`. Where no such
+limit exists (Windows), the term is ignored.
 
 `threads` bounds CPU threads: Rust sizes its async runtime with it. The Python base implementation runs
 one event loop in one process, so `threads` only caps its helper thread pool; multi-process Python is a

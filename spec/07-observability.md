@@ -37,3 +37,4 @@ At the end of a run, emitted as the `summary` event and printed to stderr:
 | `outcomes` | Object: outcome → count |
 | `hosts` | Distinct hosts seen |
 | `blocked_hosts` | List of hosts blocked for the run |
+| `workers` | The effective in-flight limit (`workers` in [02-config.md](02-config.md) Resources) |

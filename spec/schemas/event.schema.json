@@ -17,6 +17,6 @@
     {"if": {"properties": {"event": {"const": "host_paused"}}}, "then": {"required": ["host", "seconds", "reason"]}},
     {"if": {"properties": {"event": {"const": "host_blocked"}}}, "then": {"required": ["host"]}},
     {"if": {"properties": {"event": {"const": "summary"}}},
-     "then": {"required": ["elapsed", "finished", "requests", "outcomes", "hosts", "blocked_hosts"]}}
+     "then": {"required": ["elapsed", "finished", "requests", "outcomes", "hosts", "blocked_hosts", "workers"]}}
   ]
 }
