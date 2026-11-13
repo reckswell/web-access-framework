@@ -66,6 +66,16 @@ def start_server(port, delay_ms, page_kb):
     sys.exit(f"bench_server did not start on port {port}")
 
 
+def python_cmd(env):
+    """Command for the Python port. On Windows a venv's python.exe is only a launcher that starts the real
+    interpreter as a child, so measuring it would miss the engine: start the base interpreter the same way
+    the launcher does instead."""
+    if os.name == "nt" and sys.prefix != sys.base_prefix:
+        env["__PYVENV_LAUNCHER__"] = sys.executable
+        return [sys._base_executable, "-m", "webaccess"]
+    return [sys.executable, "-m", "webaccess"]
+
+
 def run_once(a, workers, out, input_file, env):
     """One engine run -> result dict."""
     resources = {"level": "max", "max_concurrency": workers, "max_memory_mb": a.memory_mb, "threads": a.threads}
@@ -74,7 +84,8 @@ def run_once(a, workers, out, input_file, env):
               "[goal]", 'type = "fetch"']
     cfg, records, log = out / "config.toml", out / "records.jsonl", out / "stderr.txt"
     cfg.write_text("\n".join(lines) + "\n")
-    cmd = [str(ROOT / f"rust/target/release/webaccess{EXE}")] if a.port == "rust" else [sys.executable, "-m", "webaccess"]
+    env = dict(env)
+    cmd = [str(ROOT / f"rust/target/release/webaccess{EXE}")] if a.port == "rust" else python_cmd(env)
     server = None if a.input else start_server(a.server_port, a.delay_ms, a.page_kb)
     with open(log, "w") as err:
         start = time.monotonic()
