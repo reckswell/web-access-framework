@@ -8,7 +8,7 @@ Live mode (--input FILE) fetches a URL list from the internet instead.
   python bench/run.py --port rust --hosts 50000 --workers 0,4096,16384 --memory-mb 32768
   python bench/run.py --port python --input top10k.txt --memory-mb 32768
 """
-import argparse, json, os, platform, socket, subprocess, sys, time
+import argparse, json, os, platform, shutil, socket, subprocess, sys, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -116,9 +116,13 @@ def main():
 
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    if a.port == "rust" or not a.input:  # build what is needed; quick when up to date
+    if (a.port == "rust" or not a.input) and shutil.which("cargo"):  # build what is needed; quick when up to date
         subprocess.run(["cargo", "build", "--release", "--bins", "--example", "bench_server"],
                        cwd=ROOT / "rust", check=True)
+    needed = ([f"rust/target/release/webaccess{EXE}"] if a.port == "rust" else []) + \
+             ([] if a.input else [f"rust/target/release/examples/bench_server{EXE}"])
+    if missing := [n for n in needed if not (ROOT / n).exists()]:
+        sys.exit(f"missing {', '.join(missing)}: install Rust, or unzip CI's webaccess-<OS> artifact into rust/target/release/")
     if a.input:
         input_file, env = Path(a.input), dict(os.environ)
     else:  # loopback only: no proxy

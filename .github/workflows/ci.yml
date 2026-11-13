@@ -40,3 +40,10 @@ jobs:
       - run: cargo build --release
         working-directory: rust
       - run: python conformance/run.py -- ${{ runner.os == 'Windows' && 'rust/target/release/webaccess.exe' || 'rust/target/release/webaccess' }}
+      - uses: actions/upload-artifact@v4  # prebuilt binaries, e.g. for bench/run.py on a PC without Rust
+        with:
+          name: webaccess-${{ runner.os }}
+          path: |
+            rust/target/release/webaccess${{ runner.os == 'Windows' && '.exe' || '' }}
+            rust/target/release/examples/bench_server${{ runner.os == 'Windows' && '.exe' || '' }}
+          retention-days: 30

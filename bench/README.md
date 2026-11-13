@@ -16,6 +16,8 @@ python bench/run.py --port python --hosts 20000 --workers 0,4096 --memory-mb 327
 ```
 
 Run the Python port with the interpreter that has `webaccess` installed (`pip install -e python`).
+No Rust toolchain? Download the `webaccess-<OS>` artifact from a CI run on GitHub (Actions → the run →
+Artifacts) and unzip it into `rust/target/release/`. `run.py` builds with `cargo` only when it is installed.
 Every run uses level `max`. Options:
 
 | Option | Default | Meaning |
