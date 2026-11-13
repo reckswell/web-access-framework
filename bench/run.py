@@ -17,11 +17,11 @@ PROXY_VARS = {"http_proxy", "https_proxy", "all_proxy", "no_proxy"}
 
 
 def wait_measured(p):
-    """Wait for a process; return (CPU seconds, peak memory MB)."""
+    """Wait for a process; return (user CPU s, kernel CPU s, peak memory MB)."""
     if os.name != "nt":
         _, status, ru = os.wait4(p.pid, 0)
         p.returncode = os.waitstatus_to_exitcode(status)
-        return ru.ru_utime + ru.ru_stime, ru.ru_maxrss / (1 << 20 if sys.platform == "darwin" else 1 << 10)
+        return ru.ru_utime, ru.ru_stime, ru.ru_maxrss / (1 << 20 if sys.platform == "darwin" else 1 << 10)
     import ctypes
     from ctypes import wintypes
     p.wait()
@@ -34,7 +34,7 @@ def wait_measured(p):
                    [(n, ctypes.c_size_t) for n in ("peak_ws", "ws", "a", "b", "c", "d", "pagefile", "peak_pagefile")]
     m = Counters(cb=ctypes.sizeof(Counters))
     ctypes.windll.psapi.GetProcessMemoryInfo(int(p._handle), ctypes.byref(m), m.cb)
-    return secs(times[2]) + secs(times[3]), m.peak_ws / (1 << 20)
+    return secs(times[3]), secs(times[2]), m.peak_ws / (1 << 20)
 
 
 def total_ram_gb():
@@ -82,7 +82,8 @@ def run_once(a, workers, out, input_file, env):
     lines = ["[resources]"] + [f"{k} = {json.dumps(v)}" for k, v in resources.items() if v]
     lines += ["[engine]", "stats_interval = 0", f"https_only = {str(bool(a.input)).lower()}",
               "[goal]", 'type = "fetch"']
-    cfg, records, log = out / "config.toml", out / "records.jsonl", out / "stderr.txt"
+    tag = f"{a.port}-w{workers}-t{a.threads}" + ("-live" if a.input else f"-d{a.delay_ms}")  # one set of files per run
+    cfg, records, log = out / f"{tag}.toml", out / f"{tag}-records.jsonl", out / f"{tag}-stderr.txt"
     cfg.write_text("\n".join(lines) + "\n")
     env = dict(env)
     cmd = [str(ROOT / f"rust/target/release/webaccess{EXE}")] if a.port == "rust" else python_cmd(env)
@@ -91,12 +92,13 @@ def run_once(a, workers, out, input_file, env):
         start = time.monotonic()
         p = subprocess.Popen(cmd + ["run", str(cfg), "--input", str(input_file), "--output", str(records)],
                              stderr=err, env=env)
-        cpu, peak = wait_measured(p)
+        user, kernel, peak = wait_measured(p)
+        cpu = user + kernel
         wall = time.monotonic() - start
     server_cpu = 0.0
     if server:
         server.terminate()
-        server_cpu, _ = wait_measured(server)
+        server_cpu = sum(wait_measured(server)[:2])
     text = log.read_text(errors="replace")
     summary = json.loads(text.rsplit("summary: ", 1)[1].splitlines()[0]) if "summary: " in text else {}
     if p.returncode or not summary:
@@ -106,7 +108,8 @@ def run_once(a, workers, out, input_file, env):
             "threads": a.threads or cores, "memory_budget_mb": a.memory_mb or 4096,
             "sites": summary["finished"], "ok": summary["outcomes"].get("ok", 0),
             "sites_per_s": round(summary["finished"] / summary["elapsed"], 1), "wall_s": round(wall, 2),
-            "engine_cpu_s": round(cpu, 2), "cpu_used_pct": round(100 * cpu / wall / cores, 1),
+            "engine_cpu_s": round(cpu, 2), "engine_kernel_s": round(kernel, 2),
+            "cpu_used_pct": round(100 * cpu / wall / cores, 1), "cpu_ms_per_site": round(1000 * cpu / summary["finished"], 3),
             "peak_mb": round(peak, 1), "server_cpu_s": round(server_cpu, 2),
             "delay_ms": None if a.input else a.delay_ms, "page_kb": None if a.input else a.page_kb}
 
@@ -142,11 +145,12 @@ def main():
     machine = {"os": platform.platform(), "cpu": platform.processor() or platform.machine(),
                "cores": os.cpu_count(), "ram_gb": round(total_ram_gb(), 1), "python": platform.python_version()}
     print(json.dumps(machine))
-    print(f"{'port':6} {'workers':>7} {'sites/s':>8} {'ok':>7} {'wall s':>7} {'CPU %':>6} {'peak MB':>8} {'server CPU s':>12}")
+    print(f"{'port':6} {'workers':>7} {'sites/s':>8} {'ok':>7} {'wall s':>7} {'CPU %':>6} {'peak MB':>8} {'server CPU s':>12} {'CPU ms/site':>11} {'kernel %':>8}")
     for w in (int(x) for x in a.workers.split(",")):
         r = run_once(a, w, out, input_file, env)
         print(f"{r['port']:6} {r['workers']:>7} {r['sites_per_s']:>8} {r['ok']:>7} {r['wall_s']:>7} "
-              f"{r['cpu_used_pct']:>6} {r['peak_mb']:>8} {r['server_cpu_s']:>12}", flush=True)
+              f"{r['cpu_used_pct']:>6} {r['peak_mb']:>8} {r['server_cpu_s']:>12} {r['cpu_ms_per_site']:>11} "
+              f"{round(100 * r['engine_kernel_s'] / max(r['engine_cpu_s'], 1e-9)):>8}", flush=True)
         with open(out / "results.jsonl", "a") as f:
             f.write(json.dumps({**machine, **r}) + "\n")
 
